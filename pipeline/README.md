@@ -153,7 +153,7 @@ Où :
 ## 📝 Notes de reproductibilité
 
 - Si NA dans les tables R, vérifier la présence des variables log/groupes dans les CSV produits par l’étape 03.
-- Toute la configuration est dans `config.json`.
+- Toute la configuration est dans `config.json`
 
 ---
 

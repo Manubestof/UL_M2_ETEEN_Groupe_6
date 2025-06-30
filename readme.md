@@ -29,19 +29,21 @@ This repository contains a modular, fully documented pipeline for collecting, me
 ### Setup
 
 1. Clone the repository:
+
 ```bash
 git clone https://github.com/Manubestof/Memoire_M2.git
 cd UL_M2_ETEEN_Groupe_6
 ```
 
 2. Install Python dependencies:
+
 ```bash
 pip install -r requirements.txt
 ```
 
 3. Configure your API key and parameters in `.env`.
-
 4. Run the entire pipeline or step by step
+
 ```bash
 cd pipeline
 python run_pipeline.py
@@ -55,7 +57,9 @@ python 03_validate_datasets.py
 # Then run the R analysis for each period:
 Rscript 04_econometric_analysis.R
 ```
+
 Arguments:
+
 - `--fetch-missing`: Enables the logic to fetch only missing years from the API (default: enabled).
 - `--clear-cache`: Forces deletion of all cached export data before fetching (useful for a clean run).
 - Both options are available as CLI arguments and/or in `config.json`.
@@ -82,12 +86,12 @@ Arguments:
 ## 📚 Data Sources
 
 - **EM-DAT:**
-    - [1979–2000](https://public.emdat.be/data)
-    - [⩾2000](https://data.humdata.org/dataset/emdat-country-profiles)
-- [**GeoMet**](https://www.ifo.de/ebdc-datensaetze/ifo-game-die-geologique-und-meteorologische-event-datenbank)
-- [**Trade flow (UN Comtrade)**](https://comtradeplus.un.org/TradeFlow)
+  - [1979–2000](https://public.emdat.be/data)
+  - [⩾2000](https://data.humdata.org/dataset/emdat-country-profiles)
+- [**GeoMet:**]() [ifo Institute](https://www.ifo.de/sites/default/files/facts/EBDC/ifoGAME_download.zip "Click to download directly") - _from 1979 to 2010_
+- **Exports:** [Trade flow - UN Comtrade](https://comtradeplus.un.org/TradeFlow)
 - [**Income groups:** World Bank Country and Lending Groups](https://datahelpdesk.worldbank.org/knowledgebase/articles/906519-world-bank-country-and-lending-groups)
-- [**Population:** United Nations, Department of Economic and Social Affairs, Population Division](https://population.un.org/wpp/downloads?folder=Standard%20Projections&group=Most%20used)
+- [**Population:** United Nations, Department of Economic and Social Affairs, Population Division](https://population.un.org/wpp/assets/Excel%20Files/1_Indicator%20(Standard)/EXCEL_FILES/1_General/WPP2024_GEN_F01_DEMOGRAPHIC_INDICATORS_COMPACT.xlsx)
 
 ## 🔄 Reproducibility
 
@@ -112,6 +116,7 @@ If you use this pipeline, please cite:
 ## 📞 Contact
 
 For questions or issues:
+
 - Create an issue on GitHub
 - Check the pipeline documentation in `pipeline/README.md`
 
@@ -139,3 +144,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - If you encounter NA or missing values in R output tables, check that all log/group variables are present in the CSVs produced by step 03.
 - All configuration (periods, disaster types, output paths) is in `config.json`.
 - For more details, see the pipeline/README.md and the methodology section in the LaTeX manuscript.
+
+## ✨Future improvments
+
+Use APIs for most data sources

@@ -8,7 +8,7 @@
   "LOG_LEVEL": "TRACE",
   "EXPORT_PERIODS": [
     [1979, 2000],
-    [2000, 2024]
+    [2000, 2010]
   ],
   "DISASTER_TYPES": [
     "Earthquake",

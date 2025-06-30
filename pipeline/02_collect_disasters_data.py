@@ -33,6 +33,7 @@ logger.add(sys.stderr, level=LOG_LEVEL)
 EMDAT_DIR = DATA_DIR / "emdat"
 GEOMET_DIR = DATA_DIR / "geomet"
 WORLDBANK_DIR = DATA_DIR / "world_bank"
+UNDESA_DIR = DATA_DIR / "undesa"
 
 # Create necessary directories
 for dir_path in [CACHE_DIR, EMDAT_DIR, GEOMET_DIR, WORLDBANK_DIR]:
@@ -191,7 +192,7 @@ def load_geomet_data(year_start: int, year_end: int) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-def load_world_bank_data() -> pd.DataFrame:
+def load_income_and_population() -> pd.DataFrame:
     """
     Load World Bank data for country classification and population.
 
@@ -211,7 +212,7 @@ def load_world_bank_data() -> pd.DataFrame:
         df_income = df_income[["ISO", "Income group", "is_poor_country"]]
 
         # Load population data (explicit mapping)
-        pop_file = WORLDBANK_DIR / "total_population.xlsx"
+        pop_file = UNDESA_DIR / "total_population.xlsx"
         df_pop = pd.read_excel(pop_file, sheet_name="Estimates", header=16)
         df_pop = df_pop.rename(
             columns={
@@ -412,7 +413,7 @@ def create_disaster_dataset(
     # Load base data
     emdat_df = load_emdat_data(year_start, year_end)
     geomet_df = load_geomet_data(year_start, year_end)
-    worldbank_df = load_world_bank_data()
+    worldbank_df = load_income_and_population()
 
     # Process EM-DAT
     if not emdat_df.empty:
@@ -608,13 +609,9 @@ def create_disaster_dataset(
 if __name__ == "__main__":
     logger.info("\n==============================\n   🌪️ DISASTERS DATA PIPELINE   \n==============================")
     clear_cache = get_pipeline_options()
-    # Périodes EM-DAT réelles (découpage par structure de fichier)
-    periods = {
-        "1979_2000": (1979, 2000),
-        "2000_2024": (2000, 2024)
-    }
-    for period, (start, end) in periods.items():
-        logger.info(f"\n——— 🌪️ Period {period.replace('_', ' ')} ———")
-        logger.info(f"\n——— 🌪️ Period {period.replace('_', ' ')} ———")
+    # Utilise les périodes du config.json
+    for (start, end) in EXPORT_PERIODS:
+        period_str = f"{start}_{end}"
+        logger.info(f"\n——— 🌪️ Period {period_str.replace('_', ' ')} ———")
         df = create_disaster_dataset(start, end, clear_cache=clear_cache)
     logger.success(f"🌪️ Disasters data pipeline completed successfully! cf {CACHE_DIR}")

@@ -2,7 +2,6 @@ pandas>=2.2.3              # DataFrames manipulation
 numpy>=2.2.3               # Numerical computing
 loguru>=0.7.3              # Enhanced logging
 openpyxl>=3.1.5            # Excel file reading/writing (.xlsx)
-linearmodels>=6.1          # Panel data econometrics (PanelOLS)
 comtradeapicall>=1.2.1     # UN Comtrade API client
 python-dotenv>=1.0.0       # Environment variables management
 urllib3>=2.4.0             # HTTP requests handling
