@@ -30,8 +30,8 @@ results/
 Thumbs.db
 
 # Source files to uncoment for publication
-# article/
-# memoire/
+article/
+memoire/
 
 *_backup*
 *_dev*
