@@ -100,11 +100,11 @@ Rscript 04_econometric_analysis.R
 If you use this pipeline, please cite:
 
 ```bibtex
-@misc{memoire_reproduction_2025,
+@misc{Effet des catasrophes naturelles sur les exports internationaux,
   title={Modular Pipeline for Natural Disasters and Exports Analysis},
-  author={Emmanuel},
+  author={Emmanuel Le Hir, Diane Varichon, Stéphane Nzépa, Arthur Berthod},
   year={2025},
-  url={https://github.com/Manubestof/Memoire_M2}
+  url={https://github.com/Manubestof/UL_M2_ETEEN_Groupe_6}
 }
 ```
 
