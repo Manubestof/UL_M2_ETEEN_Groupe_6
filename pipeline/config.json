@@ -10,13 +10,23 @@
     [1979, 2000],
     [2000, 2024]
   ],
-  "DISASTER_TYPES": ["Earthquake", "Storm", "Flood", "Extreme temperature"],
+  "DISASTER_TYPES": [
+    "Earthquake",
+    "Storm",
+    "Flood",
+    "Extreme temperature"
+  ],
   "SMALL_COUNTRY_THRESHOLD": 20000000,
   "POOR_COUNTRY_YEAR": 2000,
   "MIN_OBSERVATIONS_REGRESSION": 50,
   "SIGNIFICANCE_THRESHOLD": 0.05,
   "EXCLUDED_ISO_CODES": [
-    "AIA", "ANT", "ASM", "ATB", "BES", "BLM", "BMU", "BUR", "BYE", "BYS", "CCK", "COK", "CSH", "CSK", "CUW", "DDR", "FXX", "FLK", "GIB", "GLP", "GUF", "GUM", "HKG", "IOT", "JEY", "MAC", "MAF", "MNP", "MSR", "MTQ", "MYT", "NCL", "NIU", "NFK", "PYF", "REU", "SCG", "SHN", "SJM", "SPM", "SUH", "SUN", "SXK", "SXM", "TCA", "TKL", "TMP", "VGB", "VIR", "WLF", "YMD", "YUG", "ZAR"
+    "AIA", "ANT", "ASM", "ATB", "BES", "BLM", "BMU", "BUR", "BYE", "BYS",
+    "CCK", "COK", "CSH", "CSK", "CUW", "DDR", "FXX", "FLK", "GIB", "GLP",
+    "GUF", "GUM", "HKG", "IOT", "JEY", "MAC", "MAF", "MNP", "MSR", "MTQ",
+    "MYT", "NCL", "NIU", "NFK", "PYF", "REU", "SCG", "SHN", "SJM", "SPM",
+    "SUH", "SUN", "SXK", "SXM", "TCA", "TKL", "TMP", "VGB", "VIR", "WLF",
+    "YMD", "YUG", "ZAR"
   ],
   "CLEAR_CACHE": true,
   "FETCH_MISSING": true
