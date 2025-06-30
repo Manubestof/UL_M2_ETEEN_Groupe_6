@@ -60,6 +60,10 @@ PIPELINE_DIR = Path(__file__).parent
 logger.remove()
 logger.add(sys.stderr, level=config.get("LOG_LEVEL", "INFO"))
 
+# Création des dossiers nécessaires avant toute étape
+for d in [DATA_DIR, CACHE_DIR, RESULTS_DIR, TABLES_DIR, Path(config.get("DATASETS_DIR", "datasets"))]:
+    d.mkdir(parents=True, exist_ok=True)
+
 
 def run_step(idx, step_file, description, rscript=False):
     logger.info(f"[STEP {idx+1}] {description}\n")
@@ -72,11 +76,14 @@ def run_step(idx, step_file, description, rscript=False):
         cmd = ["Rscript", str(script_path)]
     try:
         result = subprocess.run(cmd, check=True)
-        logger.success(f"✅ Étape terminée : {step_file}")
         print("="*100)
         return True
     except subprocess.CalledProcessError as e:
         logger.error(f"❌ Erreur lors de l'exécution de {step_file} : {e}")
+        print("="*100)
+        return False
+    except Exception as e:
+        logger.error(f"❌ Exception inattendue lors de l'exécution de {step_file} : {e}")
         print("="*100)
         return False
 
@@ -95,16 +102,23 @@ def main():
             logger.error("Numéro d'étape invalide. Choisir entre 1 et 4.")
             sys.exit(1)
         step_file, description = PIPELINE_STEPS[idx]
-        run_step(idx, step_file, description, rscript=step_file.endswith(".R"))
+        ok = run_step(idx, step_file, description, rscript=step_file.endswith(".R"))
+        if not ok:
+            logger.error(f"Arrêt du pipeline à l'étape {idx+1}.")
+            sys.exit(1)
         return
 
-    # Exécution séquentielle de toutes les étapes
+    # Exécution séquentielle stricte de toutes les étapes
     for idx, (step_file, description) in enumerate(PIPELINE_STEPS):
         ok = run_step(idx, step_file, description, rscript=step_file.endswith(".R"))
         if not ok:
             logger.error(f"Arrêt du pipeline à l'étape {idx+1}.")
             sys.exit(1)
-    logger.success("\n🎉 Pipeline complet exécuté avec succès !")
+    logger.info("\n🎉 Pipeline complet exécuté avec succès !")
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        logger.error(f"Erreur fatale dans l'orchestrateur pipeline : {e}")
+        sys.exit(1)

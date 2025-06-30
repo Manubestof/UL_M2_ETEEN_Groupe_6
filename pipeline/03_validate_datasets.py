@@ -30,6 +30,7 @@ periods = {f"{start}_{end}": (start, end) for (start, end) in EXPORT_PERIODS}
 
 print("\n==================================\n    ✅ VALIDATE DATASETS (3/4)   \n==================================\n")
 
+any_success = False
 for period, (start, end) in periods.items():
     try:
         # --- Load exports ---
@@ -174,10 +175,27 @@ for period, (start, end) in periods.items():
             f"  • Poor countries  ({ref_year}) : {n_poor}\n"
         )
         logger.trace(f"Columns:\n{list(merged_final.columns)}\n")
+        # --- Diagnostic croisé pour NA R : présence des combinaisons critiques ---
+        # Pour chaque type de catastrophe, compter les lignes *_sig_* == 1 par sous-groupe
+        disaster_types = config.get('DISASTER_TYPES', [])
+        sig_flags = [col for col in merged_final.columns if col.endswith('_sig_p90') or col.endswith('_sig_anydeaths') or col.endswith('_sig_abs1000')]
+        for dtype in disaster_types:
+            dtype_key = dtype.lower().replace(' ', '_')
+            for flag in ['sig_p90', 'sig_anydeaths', 'sig_abs1000']:
+                colname = f"{dtype_key}_{flag}"
+                if colname in merged_final.columns:
+                    for group, group_label in [("is_poor_country", "Poor"), ("is_small_country", "Small")]:
+                        if group in merged_final.columns:
+                            n = merged_final.query(f"{group} == 1 and {colname} == 1").shape[0]
+                            logger.debug(f"[DIAG] {colname} & {group}=1 : {n} lignes")
         # --- Save ---
         DATASETS_DIR.mkdir(exist_ok=True)
         out_csv = DATASETS_DIR / f"econometric_dataset_{start}_{end}.csv"
         merged_final.to_csv(out_csv, index=False)
-        logger.success(f"✅ Saved econometric dataset: {out_csv.name} ({n_obs:,} rows)")
+        logger.info(f"✅ Saved econometric dataset: {out_csv.name} ({n_obs:,} rows)")
+        any_success = True
     except Exception as e:
         logger.error(f"Error during dataset preparation for period {period}: {e}")
+if not any_success:
+    logger.error("❌ Aucune période n'a pu être traitée correctement.\n")
+    sys.exit(1)

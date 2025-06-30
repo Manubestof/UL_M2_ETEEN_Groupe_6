@@ -719,9 +719,20 @@ def create_disaster_dataset(
 if __name__ == "__main__":
     print("\n==================================\n   🌪️ PREPROCESS EM-DAT & GEOMET (2/4)   \n==================================\n")
     clear_cache = get_pipeline_options()
-    # Utilise les périodes du config.json
+    all_success = True
     for (start, end) in EXPORT_PERIODS:
         period_str = f"{start}_{end}"
         logger.info(f"\n——— 🌪️ Period {period_str.replace('_', ' ')} ———")
-        df = create_disaster_dataset(start, end, clear_cache=clear_cache)
-    logger.success(f"🌪️ Disasters data pipeline completed successfully! cf {CACHE_DIR}")
+        try:
+            df = create_disaster_dataset(start, end, clear_cache=clear_cache)
+            if df is None or df.empty:
+                all_success = False
+                logger.error(f"❌ Aucune donnée de catastrophes produite pour la période {period_str}.")
+        except Exception as e:
+            all_success = False
+            logger.error(f"❌ Erreur lors du traitement de la période {period_str}: {e}")
+    if all_success:
+        logger.info(f"🌪️ Disasters data pipeline completed successfully! cf {CACHE_DIR}")
+    else:
+        logger.error("❌ Le pipeline catastrophes s'est arrêté suite à une ou plusieurs erreurs critiques.\n")
+        sys.exit(1)

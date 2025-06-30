@@ -39,7 +39,12 @@ logger.remove()
 logger.add(sys.stderr, level=LOG_LEVEL)
 
 # Créer les dossiers nécessaires
-CACHE_DIR.mkdir(exist_ok=True)
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+(DATA_DIR / "exports").mkdir(parents=True, exist_ok=True)
+Path(config.get("DATASETS_DIR", "datasets")).mkdir(parents=True, exist_ok=True)
+Path(config.get("RESULTS_DIR", "results")).mkdir(parents=True, exist_ok=True)
+Path(config.get("TABLES_DIR", "results/tables")).mkdir(parents=True, exist_ok=True)
 
 
 def get_cache_path(data_type: str) -> Path:
@@ -253,7 +258,7 @@ if __name__ == "__main__":
     clear_cache, fetch_missing = get_pipeline_options()
     from utils.utils import fetch_comtrade_exports
     exports_dir = DATA_DIR / "exports"
-    exports_dir.mkdir(exist_ok=True)
+    exports_dir.mkdir(parents=True, exist_ok=True)
     for (start, end) in EXPORT_PERIODS:
         if fetch_missing:
             logger.info(f"Récupération des données manquantes sur {start}-{end} via Comtrade API...")
@@ -269,6 +274,7 @@ if __name__ == "__main__":
         if not df.empty:
             any_success = True
     if any_success:
-        logger.success(f"✅ Données exports sauvegardées dans le cache fichier '{get_cache_path('exports_combined')}'.\n")
+        logger.info(f"✅ Données exports sauvegardées dans le cache fichier '{get_cache_path('exports_combined')}'.\n")
     else:
         logger.error("❌ Aucune période n'a pu être traitée correctement.\n")
+        sys.exit(1)
