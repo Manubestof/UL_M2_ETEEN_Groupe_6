@@ -28,15 +28,21 @@ make_table_df <- function(vars, models, inter_vars = NULL, types = NULL, names =
   keep <- which(!sapply(models, is.null))
   models <- models[keep]
   n <- length(models)
+  # Correction : s'assurer que vars est de longueur n et ne contient pas NA
   if (!is.null(vars)) vars <- vars[keep]
   if (!is.null(types)) types <- types[keep]
   if (!is.null(names)) names <- names[keep]
   if (!is.null(inter_vars)) inter_vars <- inter_vars[keep]
-  safe_extract <- function(i, fun, ...) {
-    if (i > length(models) || is.null(models[[i]])) return(NA)
-    fun(models[[i]], ...)
+  safe_extract <- function(i, fun, varname) {
+    if (i > length(models) || is.null(models[[i]]) || is.null(varname) || is.na(varname) || !nzchar(varname)) return(NA)
+    fun(models[[i]], varname)
   }
-  main <- unlist(lapply(seq_len(n), function(i) format_csv(safe_extract(i, extract_stats, if (!is.null(vars)) vars[i] else NA))))
+  # Correction : ne jamais passer NA comme nom de variable
+  main <- unlist(lapply(seq_len(n), function(i) {
+    v <- if (!is.null(vars) && length(vars) >= i) vars[i] else NA
+    if (is.null(v) || is.na(v) || !nzchar(v)) return(NA)
+    format_csv(safe_extract(i, extract_stats, v))
+  }))
   interaction <- if (!is.null(inter_vars)) unlist(lapply(seq_len(n), function(i) format_csv(safe_extract(i, extract_stats, inter_vars[i])))) else rep(NA, n)
   control <- unlist(lapply(seq_len(n), function(i) format_csv(safe_extract(i, extract_stats, "d_ln_population"))))
   r2 <- unlist(lapply(models, function(m) if (!is.null(m)) round(summary(m)$r.squared,4) else NA))
@@ -55,38 +61,6 @@ make_table_df <- function(vars, models, inter_vars = NULL, types = NULL, names =
   )
   return(df)
 }
-
-# Fonction factorisée pour générer les tables économétriques (doit être visible partout)
-# make_table_df <- function(vars, models, inter_names = NULL, types = NULL) {
-#   # Filtrer les modèles non-NULL
-#   keep <- which(!sapply(models, is.null))
-#   vars <- vars[keep]
-#   models <- models[keep]
-#   if (!is.null(inter_names)) inter_names <- inter_names[keep]
-#   if (!is.null(types) && length(types) == length(keep)) types <- types[keep]
-# 
-#   df <- data.frame(
-#     Variable = vars,
-#     Main = unlist(lapply(seq_along(models), function(i) format_csv(extract_stats(models[[i]], vars[i])))),
-#     Interaction = if (!is.null(inter_names)) {
-#       unlist(lapply(seq_along(models), function(i) format_csv(extract_stats(models[[i]], inter_names[i]))))
-#     } else {
-#       NA
-#     },
-#     Control = unlist(lapply(seq_along(models), function(i) format_csv(extract_stats(models[[i]], "d_ln_population")))),
-#     R2 = unlist(lapply(models, function(m) if (!is.null(m)) round(summary(m)$r.squared,4) else NA)),
-#     Obs = unlist(lapply(models, function(m) if (!is.null(m)) nobs(m) else NA)),
-#     FixedEffects = rep("Year, Country×Product, Product×Year", length(vars)),
-#     stringsAsFactors = FALSE
-#   )
-#   if (!is.null(types) && length(types) == length(vars)) {
-#     df$Type <- types
-#     # Pour garder l'ordre, on place Type en 2e colonne
-#     df <- df[, c(1, ncol(df), 2:(ncol(df)-1))]
-#   }
-#   return(df)
-# }
-
 # Détection robuste du chemin du script ou fallback sur getwd()
 get_script_dir <- function() {
   # Rscript: argv[1] est le chemin du script
@@ -224,17 +198,16 @@ for (period in EXPORT_PERIODS) {
   # --- FIN création des métriques ---
 
   # --- Correction : création explicite de data_all et data_agri ---
-  data_all <- data
   if ("is_agri" %in% names(data)) {
-    # Correction : convertir is_agri en booléen natif si besoin
-    if (is.character(data$is_agri) || is.factor(data$is_agri)) {
-      data$is_agri <- tolower(as.character(data$is_agri)) %in% c("true", "1", "t")
-    }
-    # Si numérique 0/1, convertir en logique
-    if (is.numeric(data$is_agri)) {
-      data$is_agri <- data$is_agri == 1
-    }
-    data_agri <- subset(data, is_agri == TRUE)
+    # Correction : conversion robuste de is_agri en booléen natif (AVANT data_all <- data)
+    agri_true <- c("true", "1", "t", "yes", "y", "oui", "vrai", TRUE, 1)
+    agri_false <- c("false", "0", "f", "no", "n", "non", "faux", FALSE, 0)
+    data$is_agri <- tolower(trimws(as.character(data$is_agri)))
+    data$is_agri[data$is_agri %in% agri_true] <- TRUE
+    data$is_agri[data$is_agri %in% agri_false] <- FALSE
+    data$is_agri <- as.logical(data$is_agri)
+    data_all <- data
+    data_agri <- subset(data, is_agri)
   } else {
     stop("❌ Colonne is_agri absente du dataset, impossible de créer data_agri.")
   }
@@ -260,6 +233,16 @@ for (period in EXPORT_PERIODS) {
   for (v in required_vars) {
     cat("   -", v, if (v %in% names(data_agri)) "[OK]" else "[ABSENT]", "\n")
   }
+  # --- FIN DIAGNOSTIC ---
+
+  # --- DIAGNOSTIC DEBUG AVANCÉ : distribution flags et is_agri ---
+  sig_cols <- grep('_sig_', names(data), value=TRUE)
+  cat("\n[DEBUG] Distribution des *_sig_* dans data_all :\n")
+  print(colSums(data_all[, sig_cols, drop=FALSE], na.rm=TRUE))
+  cat("[DEBUG] N lignes data_all :", nrow(data_all), "\n")
+  cat("[DEBUG] N lignes is_agri==TRUE :", sum(data_all$is_agri, na.rm=TRUE), "\n")
+  cat("[DEBUG] N lignes avec au moins un flag *_sig_* :", sum(rowSums(data_all[, sig_cols], na.rm=TRUE) > 0), "\n")
+  cat("[DEBUG] N lignes is_agri==TRUE & au moins un flag *_sig_* :", sum(data_all$is_agri & rowSums(data_all[, sig_cols], na.rm=TRUE) > 0), "\n\n")
   # --- FIN DIAGNOSTIC ---
 
   # Fix PATH for macOS compatibility (ensure system commands are available)
@@ -331,10 +314,25 @@ for (period in EXPORT_PERIODS) {
                                   data = data_agri)
   }
 
+  table1_vars <- c("ln_total_occurrence", "ln_total_deaths", "disaster_index")
+  # DEBUG: Afficher les noms de coefficients pour chaque modèle Agriculture et la variable recherchée
+  cat("\n[DEBUG] Coefficients et variable recherchée pour chaque modèle Agriculture (Table 1):\n")
+  for (i in seq_along(table1_agri_models)) {
+    mod <- table1_agri_models[[i]]
+    var <- table1_vars[i]
+    if (!is.null(mod)) {
+      cat(paste0("  - Modèle ", names(table1_agri_models)[i], ": variable recherchée '", var, "'\n"))
+      cat(paste0("    Coefs: ", paste(rownames(summary(mod)$coefficients), collapse=", "), "\n"))
+    } else {
+      cat(paste0("  - Modèle ", names(table1_agri_models)[i], ": NULL\n"))
+    }
+  }
+
   # Combiner tous modèles Table 1
   table1_models <- c(table1_all_models, table1_agri_models)
-  table1_vars <- c("ln_total_occurrence", "ln_total_deaths", "disaster_index")
-  table1_names <- rep(table1_vars, 2)
+  # Correction : le vecteur vars doit être dupliqué pour All et Agriculture
+  table1_vars <- rep(c("ln_total_occurrence", "ln_total_deaths", "disaster_index"), 2)
+  table1_names <- table1_vars
   table1_types <- c(rep("All", 3), rep("Agriculture", 3))
   # --- Helper functions for table formatting (ensure they exist before use) ---
   format_csv <- function(x) {
@@ -342,53 +340,33 @@ for (period in EXPORT_PERIODS) {
     if (is.list(x)) x <- unlist(x)
     paste(x, collapse = ", ")
   }
+  # Nouvelle version robuste de extract_stats avec matching partiel et debug
   extract_stats <- function(model, var) {
     if (is.null(model)) return(NA)
     coefs <- summary(model)$coefficients
+    # Matching exact
     if (var %in% rownames(coefs)) {
       est <- coefs[var, 1]
       se <- coefs[var, 2]
       pval <- coefs[var, 4]
       return(c(est, se, pval))
     } else {
-      return(NA)
+      # Matching partiel
+      matches <- grep(var, rownames(coefs), value = TRUE, fixed = TRUE)
+      # On ne garde que les matches qui existent vraiment dans coefs
+      matches <- matches[matches %in% rownames(coefs) & nzchar(matches)]
+      if (length(matches) > 0) {
+        est <- coefs[matches[1], 1]
+        se <- coefs[matches[1], 2]
+        pval <- coefs[matches[1], 4]
+        cat(sprintf("[DEBUG] Coefficient '%s' non trouvé, matching partiel sur '%s' → '%s'\n", var, var, matches[1]))
+        return(c(est, se, pval))
+      } else {
+        cat(sprintf("[DEBUG] Coefficient '%s' non trouvé dans : %s\n", var, paste(rownames(coefs), collapse=", ")))
+        return(NA)
+      }
     }
   }
-
-  # --- FACTORIZED TABLE-BUILDING FUNCTION ---
-  # make_table_df <- function(vars, models, inter_vars = NULL, types = NULL, names = NULL, fixed_effects = "Year, Country×Product, Product×Year") {
-  #   # Filter to non-NULL models
-  #   keep <- which(!sapply(models, is.null))
-  #   models <- models[keep]
-  #   n <- length(models)
-  #   # Robustly filter all label vectors to match non-NULL models
-  #   if (!is.null(vars)) vars <- vars[keep]
-  #   if (!is.null(types)) types <- types[keep]
-  #   if (!is.null(names)) names <- names[keep]
-  #   if (!is.null(inter_vars)) inter_vars <- inter_vars[keep]
-  #   safe_extract <- function(i, fun, ...) {
-  #     if (i > length(models) || is.null(models[[i]])) return(NA)
-  #     fun(models[[i]], ...)
-  #   }
-  #   main <- unlist(lapply(seq_len(n), function(i) format_csv(safe_extract(i, extract_stats, if (!is.null(vars)) vars[i] else NA))))
-  #   interaction <- if (!is.null(inter_vars)) unlist(lapply(seq_len(n), function(i) format_csv(safe_extract(i, extract_stats, inter_vars[i])))) else rep(NA, n)
-  #   control <- unlist(lapply(seq_len(n), function(i) format_csv(safe_extract(i, extract_stats, "d_ln_population"))))
-  #   r2 <- unlist(lapply(models, function(m) if (!is.null(m)) round(summary(m)$r.squared,4) else NA))
-  #   obs <- unlist(lapply(models, function(m) if (!is.null(m)) nobs(m) else NA))
-  #   fe <- rep(fixed_effects, n)
-  #   df <- data.frame(
-  #     Variable = if (!is.null(names)) names else vars,
-  #     Type = if (!is.null(types)) types else NA,
-  #     Main = main,
-  #     Interaction = interaction,
-  #     Control = control,
-  #     R2 = r2,
-  #     Obs = obs,
-  #     FixedEffects = fe,
-  #     stringsAsFactors = FALSE
-  #   )
-  #   return(df)
-  # }
 
   cat("[TABLE 1] Construction de table1_df\n")
   table1_df <- make_table_df(
@@ -397,6 +375,7 @@ for (period in EXPORT_PERIODS) {
     types = table1_types,
     names = table1_names
   )
+  print(table1_df)
   save_table_csv(table1_df, paste0("table1_disasters_exports_poor_", period_str, ".csv"))
   cat("[INFO] Table 1 sauvegardée sous:", file.path(TABLES_DIR, paste0("table1_disasters_exports_poor_", period_str, ".csv")), "\n")
   cat("[END] Table 1\n--------------------\n")
@@ -412,6 +391,7 @@ for (period in EXPORT_PERIODS) {
       models = table2_models,
       inter_vars = table2_inter
     )
+    print(table2_df)
     save_table_csv(table2_df, paste0("table2_types_poor_", period_str, ".csv"))
     cat("[INFO] Table 2 sauvegardée sous:", file.path(TABLES_DIR, paste0("table2_types_poor_", period_str, ".csv")), "\n")
     # --- Génération automatique du .tex pour Table 2 ---
@@ -442,6 +422,7 @@ for (period in EXPORT_PERIODS) {
       models = table3_models,
       inter_vars = table3_inter
     )
+    print(table3_df)
     save_table_csv(table3_df, paste0("table3_types_small_", period_str, ".csv"))
     cat("[INFO] Table 3 sauvegardée sous:", file.path(TABLES_DIR, paste0("table3_types_small_", period_str, ".csv")), "\n")
   } else {
@@ -487,6 +468,7 @@ for (period in EXPORT_PERIODS) {
     Obs = unlist(lapply(table5_models, function(m) if (!is.null(m)) nobs(m) else NA)),
     FixedEffects = rep("Year, Country×Product, Product×Year", length(table5_vars))
   )
+  print(table5_df)
   save_table_csv(table5_df, paste0("table5_extreme_emdat_", period_str, ".csv"))
   cat("[INFO] Table 5 sauvegardée sous:", file.path(TABLES_DIR, paste0("table5_extreme_emdat_", period_str, ".csv")), "\n")
   cat("[END] Table 5\n--------------------\n")
@@ -528,6 +510,7 @@ for (period in EXPORT_PERIODS) {
     Obs = unlist(lapply(table6_models, function(m) if (!is.null(m)) nobs(m) else NA)),
     FixedEffects = rep("Year, Country×Product, Product×Year", length(table6_vars))
   )
+  print(table6_df)
   save_table_csv(table6_df, paste0("table6_extreme_geomet_", period_str, ".csv"))
   cat("[INFO] Table 6 sauvegardée sous:", file.path(TABLES_DIR, paste0("table6_extreme_geomet_", period_str, ".csv")), "\n")
   cat("[END] Table 6\n--------------------\n")
@@ -544,7 +527,7 @@ for (period in EXPORT_PERIODS) {
          label = "Événements significatifs", 
          description = "Au moins 1 mort OU 2+ événements",
          filter_func = function(d) {
-           d[d$total_deaths >= 1 | d$total_events >= 2, ]
+           d[d$sum_deaths >= 1 | d$sum_events >= 2, ]
          })
   )
   for (criterion in criteria) {
@@ -593,6 +576,7 @@ for (period in EXPORT_PERIODS) {
       N = c(rep(nrow(poor_data), 4), rep(nrow(rich_data), 4))
     )
     fname2 <- paste0("table2_types_income_", period_str, "_", criterion$name, ".csv")
+    print(table2_out)
     write.csv(table2_out, file.path(TABLES_DIR, fname2), row.names=FALSE)
     cat("[INFO] Table 2 avancée sauvegardée :", fname2, "\n")
     # --- TABLE 3 avancée : Types de catastrophes par taille de pays ---
@@ -622,6 +606,7 @@ for (period in EXPORT_PERIODS) {
                sapply(models_large, function(m) if (!is.null(m)) summary(m)$coefficients[2,4] else NA)),
       N = c(rep(nrow(small_data), 4), rep(nrow(large_data), 4))
     )
+    print(table3_out)
     fname3 <- paste0("table3_types_size_", period_str, "_", criterion$name, ".csv")
     write.csv(table3_out, file.path(TABLES_DIR, fname3), row.names=FALSE)
     cat("[INFO] Table 3 avancée sauvegardée :", fname3, "\n")
@@ -652,6 +637,7 @@ for (period in EXPORT_PERIODS) {
     Period = period_str,
     Status = "Complete"
   )
+  print(results_summary) # Ajout : affichage du résumé dans la console
   write.csv(results_summary, file.path(RESULTS_DIR, paste0("article_reproduction_summary_", period_str, ".csv")), row.names = FALSE)
   cat("\n==============================\n")
   cat("[RÉSUMÉ] Analyse économétrique terminée pour période ", period_str, "\n")
@@ -659,4 +645,3 @@ for (period in EXPORT_PERIODS) {
   cat("\n[INFO] Pour les analyses multi-périodes et robustesse, lancez le script 04b_multi_period_analysis.R\n")
 }
 # Fin du script
-# Ce script ne fait que les tables par période. Les analyses multi-périodes et robustesse sont dans 04b_multi_period_analysis.R.

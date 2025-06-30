@@ -10,6 +10,7 @@ from pathlib import Path
 import pandas as pd
 from loguru import logger
 import json
+import numpy as np
 from utils.utils import clean_iso_codes
 
 # Load config from config.json
@@ -27,8 +28,7 @@ logger.add(sys.stderr, level=LOG_LEVEL)
 
 periods = {f"{start}_{end}": (start, end) for (start, end) in EXPORT_PERIODS}
 
-logger.info("\n==============================\n   🟢 FINAL ANALYSIS DATASET   \n==============================")
-logger.info("[3/4] Préparation d'un dataset économétrique par période...")
+print("\n==================================\n    ✅ VALIDATE DATASETS (3/4)   \n==================================\n")
 
 for period, (start, end) in periods.items():
     try:
@@ -103,8 +103,6 @@ for period, (start, end) in periods.items():
         other_cols = [col for col in merged_final.columns if col not in required_cols]
         ordered_cols = [col for col in required_cols if col in merged_final.columns] + other_cols
         merged_final = merged_final[ordered_cols]
-        # === AJOUT : Calcul des variables log et classifications internes ===
-        import numpy as np
         # 1. ln_total_occurrence : log(1 + somme des événements majeurs)
         event_cols = [col for col in merged_final.columns if col.endswith('_events')]
         if event_cols:
@@ -135,7 +133,10 @@ for period, (start, end) in periods.items():
             merged_final = merged_final.sort_values(['ISO', 'cmdCode', 'Year'])
             merged_final['ln_population'] = np.log(merged_final['Population'])
             merged_final['d_ln_population'] = merged_final.groupby(['ISO', 'cmdCode'])['ln_population'].diff()
-        # === FIN AJOUT ===
+        # 7. disaster_index : somme pondérée des intensités normalisées (GeoMet)
+        intensity_cols = [col for col in merged_final.columns if col.endswith('_intensity')]
+        if intensity_cols:
+            merged_final['disaster_index'] = merged_final[intensity_cols].sum(axis=1, skipna=True)
         # --- Logging summary ---
         n_obs = len(merged_final)
         n_iso = merged_final['ISO'].nunique() if 'ISO' in merged_final.columns else 'N/A'
@@ -143,6 +144,20 @@ for period, (start, end) in periods.items():
         an_min = merged_final['Year'].min() if 'Year' in merged_final.columns else 'N/A'
         an_max = merged_final['Year'].max() if 'Year' in merged_final.columns else 'N/A'
         n_agri = merged_final['is_agri'].sum() if 'is_agri' in merged_final.columns else 0
+
+        # Warnings if unexpected NA or 0 values
+        if n_obs == 0:
+            logger.warning(f"Nombre d'observations nul pour la période {start}-{end}.")
+        if n_iso == 'N/A' or n_iso == 0:
+            logger.warning(f"Nombre de pays (ISO) nul ou non disponible pour la période {start}-{end}.")
+        if n_prod == 'N/A' or n_prod == 0:
+            logger.warning(f"Nombre de produits (cmdCode) nul ou non disponible pour la période {start}-{end}.")
+        if an_min == 'N/A' or pd.isna(an_min):
+            logger.warning(f"Année minimale (Year) non disponible pour la période {start}-{end}.")
+        if an_max == 'N/A' or pd.isna(an_max):
+            logger.warning(f"Année maximale (Year) non disponible pour la période {start}-{end}.")
+        if n_agri == 0:
+            logger.warning(f"Aucune observation agricole (is_agri=1) pour la période {start}-{end}.")
         pct_agri = (n_agri / n_obs * 100) if n_obs > 0 else 0
         # Log nombre de small/poor countries pour l'année de référence
         ref_year = config.get("POOR_COUNTRY_YEAR", 2016)

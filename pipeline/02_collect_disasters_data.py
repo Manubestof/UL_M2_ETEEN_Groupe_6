@@ -83,7 +83,7 @@ def preview_dataframe(df, key_columns=None, n_random=3):
         preview_idx.append(len(df)-1)
     preview_idx = sorted(set(preview_idx))
     preview_df = df.iloc[preview_idx][preview_cols] if preview_cols else df.iloc[preview_idx]
-    logger.debug(f"\nPreview (sorted, first, {n_random} random, last):\n{preview_df.to_string(index=False)}")
+    logger.trace(f"\nPreview (sorted, first, {n_random} random, last):\n{preview_df.to_string(index=False)}")
 
 def load_emdat_data(year_start: int, year_end: int) -> pd.DataFrame:
     """
@@ -190,6 +190,45 @@ def load_geomet_data(year_start: int, year_end: int) -> pd.DataFrame:
     except Exception as e:
         logger.error(f"Failed to load GeoMet data: {e}")
         return pd.DataFrame()
+
+# --- AGGREGATE GEOMET INTENSITY BY COUNTRY-YEAR AND DISASTER TYPE ---
+def aggregate_geomet_intensity(geomet_df):
+    if geomet_df.empty:
+        return geomet_df
+    # Mapping from disaster type to GeoMet variable suffix
+    type_suffixes = {
+        'Earthquake': 'eq',
+        'Flood': 'fld',
+        'Storm': 'str',
+        'Extreme temperature': 'temp',
+    }
+    # For each disaster type, aggregate proxies
+    agg_frames = []
+    for dtype, suffix in type_suffixes.items():
+        # Find all relevant columns for this type
+        proxies = [
+            f'killed_pop_{suffix}',
+            f'affected_pop_{suffix}',
+            f'damage_gdp_{suffix}'
+        ]
+        cols_present = [c for c in proxies if c in geomet_df.columns]
+        if not cols_present:
+            continue
+        # Sum across all proxies for intensity
+        geomet_df[f'{dtype.lower().replace(" ", "_")}_intensity'] = geomet_df[cols_present].sum(axis=1, skipna=True)
+        # Aggregate by ISO, Year
+        agg = geomet_df.groupby(['ISO', 'Year'])[f'{dtype.lower().replace(" ", "_")}_intensity'].sum().reset_index()
+        agg_frames.append(agg)
+    # Merge all *_intensity columns into a single DataFrame
+    if not agg_frames:
+        return geomet_df
+    intensity_df = agg_frames[0]
+    for frame in agg_frames[1:]:
+        intensity_df = intensity_df.merge(frame, on=['ISO', 'Year'], how='outer')
+    # Merge back into original GeoMet (on ISO, Year)
+    geomet_df = geomet_df.drop(columns=[c for c in geomet_df.columns if c.endswith('_intensity')], errors='ignore')
+    geomet_df = geomet_df.merge(intensity_df, on=['ISO', 'Year'], how='left')
+    return geomet_df
 
 
 def load_income_and_population() -> pd.DataFrame:
@@ -413,6 +452,8 @@ def create_disaster_dataset(
     # Load base data
     emdat_df = load_emdat_data(year_start, year_end)
     geomet_df = load_geomet_data(year_start, year_end)
+    # AGGREGATE GEOMET INTENSITY COLUMNS
+    geomet_df = aggregate_geomet_intensity(geomet_df)
     worldbank_df = load_income_and_population()
 
     # Process EM-DAT
@@ -537,6 +578,21 @@ def create_disaster_dataset(
                 flag_p90.extend((group[intensity_col] > p90).astype(int))
             result[f"{base}_geomet_sig_p90"] = flag_p90
 
+    # --- EXTREME EVENT INDICATORS ---
+    # For each disaster type, create extreme_*_emdat and extreme_*_geomet columns
+    for dtype in DISASTER_TYPES:
+        base = dtype.lower().replace(" ", "_")
+        # EM-DAT: extreme if sig_p90
+        sig_p90_col = f"{base}_sig_p90"
+        extreme_emdat_col = f"extreme_{base}_emdat"
+        if sig_p90_col in result.columns:
+            result[extreme_emdat_col] = result[sig_p90_col]
+        # GeoMet: extreme if geomet_sig_p90
+        geomet_sig_p90_col = f"{base}_geomet_sig_p90"
+        extreme_geomet_col = f"extreme_{base}_geomet"
+        if geomet_sig_p90_col in result.columns:
+            result[extreme_geomet_col] = result[geomet_sig_p90_col]
+
     sig_cols = [col for col in result.columns if any(
         col.endswith(suffix) for suffix in ["_sig_median", "_sig_p90", "_sig_abs1000", "_sig_anydeaths", "_geomet_sig_p90"]
     )]
@@ -547,6 +603,21 @@ def create_disaster_dataset(
             logger.info(f"  {col}: {count}")
     else:
         logger.info("Aucun indicateur d'événement significatif trouvé dans le panel.")
+
+    # --- EXTREME EVENT INDICATORS (for R tables 5/6) ---
+    # Pour chaque type, 1 si sig_p90==1, 0 sinon
+    for dtype in DISASTER_TYPES:
+        base = dtype.lower().replace(" ", "_")
+        # EM-DAT extrêmes (top 10% morts/pop)
+        sig_col = f"{base}_sig_p90"
+        extreme_col = f"extreme_{base}_emdat"
+        if sig_col in result.columns:
+            result[extreme_col] = (result[sig_col] == 1).astype(int)
+        # GeoMet extrêmes (top 10% intensité)
+        geomet_sig_col = f"{base}_geomet_sig_p90"
+        extreme_geomet_col = f"extreme_{base}_geomet"
+        if geomet_sig_col in result.columns:
+            result[extreme_geomet_col] = (result[geomet_sig_col] == 1).astype(int)
 
     # Harmonisation stricte des colonnes World Bank (pas de if, on force les bons noms partout)
     # Population, is_poor_country, is_small_country, Income group
@@ -576,6 +647,26 @@ def create_disaster_dataset(
     result['Income group'] = result['Income group'].astype(str)
     logger.trace(f"Colonnes World Bank dans le dataset final: {[c for c in result.columns if 'poor' in c or 'small' in c or 'Income group' in c or 'Population' in c]}")
 
+    # --- FILTRAGE STRICT SUR LA PÉRIODE DEMANDÉE ET SUPPRESSION DES PAYS MANQUANTS ---
+    n_before = len(result)
+    result = result[(result["Year"] >= year_start) & (result["Year"] <= year_end)]
+    n_after_period = len(result)
+    if n_after_period < n_before:
+        logger.warning(f"{n_before - n_after_period} lignes hors période [{year_start}-{year_end}] supprimées du panel final.")
+    n_before_country = len(result)
+    result = result[result["Country"].notna()]
+    n_after_country = len(result)
+    if n_after_country < n_before_country:
+        logger.warning(f"{n_before_country - n_after_country} lignes supprimées car Country=NaN après filtrage période.")
+
+    # --- FILTRAGE FINAL : années et pays valides ---
+    before = len(result)
+    result = result[(result['Year'] >= year_start) & (result['Year'] <= year_end)]
+    logger.info(f"Filtrage années [{year_start}, {year_end}] : {before - len(result)} lignes supprimées")
+    before2 = len(result)
+    result = result[result['Country'].notna()]
+    logger.info(f"Filtrage Country non-NaN : {before2 - len(result)} lignes supprimées")
+
     # Summary and preview
     n_obs = len(result)
     an_min = result['Year'].min() if 'Year' in result.columns else 'N/A'
@@ -599,6 +690,25 @@ def create_disaster_dataset(
     preview_cols = [col for col in result.columns if any(s in col for s in ["Year", "Country", "ISO", "deaths", "events"])]
     logger.debug(f"\nAperçu (quelques lignes):\n{result[preview_cols].head(5).to_string(index=False)}")
 
+    # --- DISASTER INDEX (GeoMet composite, normalisé) ---
+    # 1. Chercher toutes les colonnes *_intensity (GeoMet)
+    intensity_cols = [col for col in result.columns if col.endswith('_intensity')]
+    if intensity_cols:
+        # 2. Normaliser chaque colonne (écart-type sur tout le panel)
+        norm_intensities = []
+        for col in intensity_cols:
+            std = result[col].std(skipna=True)
+            if std > 0:
+                norm = result[col] / std
+            else:
+                norm = result[col]
+            norm_intensities.append(norm)
+        # 3. Somme pondérée (somme des intensités normalisées)
+        result['disaster_index'] = sum(norm_intensities)
+        logger.info(f"Colonne disaster_index créée à partir de {intensity_cols} (somme des intensités normalisées)")
+    else:
+        logger.warning("Aucune colonne *_intensity trouvée pour calculer disaster_index (GeoMet)")
+
     # Save to cache
     result.to_pickle(cache_file)
     logger.info(f"Cache saved: {cache_file}")
@@ -607,7 +717,7 @@ def create_disaster_dataset(
 
 # Main CLI entry
 if __name__ == "__main__":
-    logger.info("\n==============================\n   🌪️ DISASTERS DATA PIPELINE   \n==============================")
+    print("\n==================================\n   🌪️ PREPROCESS EM-DAT & GEOMET (2/4)   \n==================================\n")
     clear_cache = get_pipeline_options()
     # Utilise les périodes du config.json
     for (start, end) in EXPORT_PERIODS:

@@ -42,7 +42,9 @@ print(f"🗝️  USE_CACHE     : {USE_CACHE}")
 print(f"🧹 CLEAR_CACHE   : {CLEAR_CACHE}")
 print(f"📆 EXPORT_PERIODS: {PERIODS}")
 print(f"🌪️  DISASTER_TYPES: {DISASTER_TYPES}")
-print(f"🔒 EXCLUDED_ISO_CODES: {EXCLUDED_ISO_CODES}")
+print("🔒 EXCLUDED_ISO_CODES:")
+for i in range(0, len(EXCLUDED_ISO_CODES), 10):
+    print("\t" + ", ".join(EXCLUDED_ISO_CODES[i:i+10]))
 print("="*100 + "\n")
 
 PIPELINE_STEPS = [
@@ -60,7 +62,7 @@ logger.add(sys.stderr, level=config.get("LOG_LEVEL", "INFO"))
 
 
 def run_step(idx, step_file, description, rscript=False):
-    logger.info(f"\n[STEP {idx+1}] {description}")
+    logger.info(f"[STEP {idx+1}] {description}\n")
     script_path = PIPELINE_DIR / step_file
     if not script_path.exists():
         logger.error(f"Fichier manquant : {script_path}")
@@ -71,9 +73,11 @@ def run_step(idx, step_file, description, rscript=False):
     try:
         result = subprocess.run(cmd, check=True)
         logger.success(f"✅ Étape terminée : {step_file}")
+        print("="*100)
         return True
     except subprocess.CalledProcessError as e:
         logger.error(f"❌ Erreur lors de l'exécution de {step_file} : {e}")
+        print("="*100)
         return False
 
 
@@ -83,9 +87,6 @@ def main():
     parser.add_argument("--clear_cache", action="store_true", help="Forcer le rafraîchissement du cache (si supporté par l'étape)")
     parser.add_argument("--fetch_missing", action="store_true", help="Forcer la récupération des années manquantes (si supporté)")
     args = parser.parse_args()
-
-    logger.info("Démarrage du pipeline complet (voir README pour détails)")
-    logger.info(f"Configuration : {CONFIG_PATH}")
 
     # Exécution d'une étape précise
     if args.step:
