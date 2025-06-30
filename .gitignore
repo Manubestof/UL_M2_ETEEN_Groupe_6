@@ -1,0 +1,37 @@
+# Environment variables
+.env
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Data
+cache/
+data/
+datasets/
+results/
+
+# LaTeX auxiliary files  
+*.aux
+*.log
+*.out
+*.toc
+*.fdb_latexmk
+*.fls
+*.synctex.gz
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Source files to uncoment for publication
+# article/
+# memoire/
+
+*_backup*
+*_dev*
