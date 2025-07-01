@@ -217,7 +217,7 @@ for (period in EXPORT_PERIODS) {
     data$ln_export_value <- log(data[[export_col]] + 1)
     data$d_ln_export_value <- ave(data$ln_export_value, data$iso3, data$product_code, FUN = function(x) c(NA, diff(x)))
   }
-  # --- Création des variables nécessaires à l'analyse (conformément à l'article et au mémoire) ---
+  # --- Création des variables nécessaires à l'analyse ---
   # 1. ln_total_occurrence : log(1 + somme des événements majeurs toutes catastrophes)
   event_cols <- grep("_events$", names(data), value = TRUE)
   if (length(event_cols) > 0) {
@@ -233,7 +233,7 @@ for (period in EXPORT_PERIODS) {
   # 3. disaster_index : somme pondérée des intensités normalisées (GeoMet)
   intensity_cols <- grep("_intensity$", names(data), value = TRUE)
   if (length(intensity_cols) > 0) {
-    # Normalisation par écart-type (comme dans l'article)
+    # Normalisation par écart-type
     norm_intensities <- lapply(intensity_cols, function(col) {
       sd_col <- sd(data[[col]], na.rm=TRUE)
       if (sd_col > 0) data[[col]] / sd_col else rep(0, nrow(data))
@@ -304,7 +304,7 @@ for (period in EXPORT_PERIODS) {
   } else {
     stop("❌ Colonne is_agri absente du dataset, impossible de créer data_agri.")
   }
-  # --- Filtrage événements significatifs pour Table 1 (conformément à l'article) ---
+  # --- Filtrage événements significatifs pour Table 1
   sig_cols <- grep('_sig_', names(data_all), value=TRUE)
   if (length(sig_cols) > 0) {
     data_all_sig <- data_all[rowSums(data_all[, sig_cols], na.rm=TRUE) > 0, ]
@@ -511,18 +511,7 @@ for (period in EXPORT_PERIODS) {
     table2_filename <- paste0("table2_types_poor_", period_str, "_ln_flood_occurrence_ln_storm_occurrence_ln_earthquake_occurrence_ln_extreme_temperature_occurrence.csv")
     save_table_csv(table2_df, table2_filename)
     cat("[INFO] Table 2 sauvegardée sous:", file.path(TABLES_DIR, table2_filename), "\n")
-    # --- Génération automatique du .tex pour Table 2 ---
-    tex_path <- file.path(project_root, "memoire/tables/table2_types_poor.tex")
-    cat("% Table générée automatiquement depuis pipeline/04_econometric_analysis.R le ", format(Sys.time(), "%Y-%m-%d %H:%M"), "\n", file=tex_path)
-    cat("\\begin{table}[h]\n\\centering\n\\caption{Types of disasters, agricultural exports and poor countries}\n", file=tex_path, append=TRUE)
-    cat("\\begin{tabular}{lcccccccc}\n\\toprule\n", file=tex_path, append=TRUE)
-    # En-têtes (à adapter selon table2_df)
-    write.table(t(names(table2_df)), file=tex_path, append=TRUE, sep=" & ", row.names=FALSE, col.names=FALSE, quote=FALSE)
-    cat("\\\\\\midrule\n", file=tex_path, append=TRUE)
-    # Lignes du tableau
-    write.table(table2_df, file=tex_path, append=TRUE, sep=" & ", row.names=FALSE, col.names=FALSE, quote=FALSE)
-    cat("\\\\\\bottomrule\n\\end{tabular}\n\\end{table}\n", file=tex_path, append=TRUE)
-    cat("[INFO] Table 2 LaTeX générée sous:", tex_path, "\n")
+    # NOTE: Génération LaTeX désormais gérée par memoire/csv_to_latex.py
   } else {
     cat("[TABLE 2][WARN] Modèles ou variables manquants, table non générée.\n")
   }
@@ -986,8 +975,7 @@ for (period in EXPORT_PERIODS) {
     Period = period_str,
     Status = "Complete"
   )
-  print(results_summary) # Ajout : affichage du résumé dans la console
-  write.csv(results_summary, file.path(RESULTS_DIR, paste0("article_reproduction_summary_", period_str, ".csv")), row.names = FALSE)
+  print(results_summary)
   cat("\n==============================\n")
   cat("[RÉSUMÉ] Analyse économétrique terminée pour période ", period_str, "\n")
   cat("==============================\n")}

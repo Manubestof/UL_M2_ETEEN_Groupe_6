@@ -51,7 +51,8 @@ PIPELINE_STEPS = [
     ("01_collect_exports_data.py", "Collecte et nettoyage des exports (UN Comtrade)"),
     ("02_collect_disasters_data.py", "Collecte et préparation des catastrophes (EM-DAT, GeoMet)"),
     ("03_validate_datasets.py", "Fusion, validation, création des variables finales, datasets finaux"),
-    ("04_econometric_analysis.R", "Analyse économétrique et génération des tables (LaTeX, CSV)")
+    ("04_econometric_analysis.R", "Analyse économétrique complète (spécification pays-produit-année)"),
+    ("04b_econometric_analysis_simple.R", "Analyse économétrique simplifiée (spécification pays-année)")
 ]
 
 PIPELINE_DIR = Path(__file__).parent
