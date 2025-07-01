@@ -1,9 +1,10 @@
 #!/usr/local/bin/Rscript
-# ÉTAPE 4 : ANALYSE ÉCONOMÉTRIQUE COMPLÈTE - REPRODUCTION INTÉGRALE DE L'ARTICLE
-# Article : El Hadri, Mizra, Rabaud (2019)
+# ÉTAPE 4 : ANALYSE ÉCONOMÉTRIQUE COMPLÈTE
+# 
+# Analyse de l'impact des catastrophes naturelles sur les exportations
 # "Natural disasters and countries exports: New insights from a new (and an old) database"
 #
-# REPRODUCTION EXACTE DE TOUTES LES TABLES (1-7 + A1-A2) :
+# GÉNÉRATION DE TOUTES LES TABLES (1-7 + A1-A2) :
 # Table 1: Disasters, exports and poor countries (all four types pooled)
 # Table 2: Types of disasters, agricultural exports and poor countries  
 # Table 3: Types of disasters, agricultural exports and small countries
@@ -14,49 +15,99 @@
 # Table A1: Extreme disasters (top 20% human damage) - Appendix
 # Table A2: Extreme disasters (top 20% physical damage) - Appendix
 
-# Dynamique : lecture de config.json pour piloter toute l'analyse
+# Configuration dynamique : lecture de config.json pour piloter toute l'analyse
 library(jsonlite)
 library(dplyr)
 library(readr)
 library(tidyr)
 
+# === SÉLECTION DES MÉTRIQUES PRINCIPALES POUR CHAQUE TABLE ===
+# Modifiez ici pour choisir les variables utilisées dans les modèles principaux
+# ---- Table 1 ----
+# Par défaut : on considère uniquement les événements significatifs, comme dans l'article
+# On filtre data_all et data_agri pour ne garder que les observations avec au moins un flag *_sig_* à TRUE
+# (on suppose que les colonnes *_sig_* sont des indicateurs booléens d'événement significatif)
+# (NOTE: Le filtrage est désormais effectué APRÈS la création de data_all/data_agri dans la boucle principale)
+# Sélection des métriques principales (événements significatifs uniquement)
+metric_table1_all <- c("ln_total_occurrence", "ln_total_deaths", "disaster_index")
+metric_table1_agri <- c("ln_total_occurrence", "ln_total_deaths", "disaster_index")
+# Pour tester d'autres métriques, modifiez simplement ces vecteurs !
+# Exemples :
+# metric_table1_all <- c("ln_total_occurrence", "ln_total_deaths")
+# metric_table1_agri <- c("ln_total_occurrence", "disaster_index")
+# ---- Table 2/3 (en commentaire, à adapter plus bas) ----
+# table2_vars <- c("ln_flood_count", "ln_storm_count", "ln_earthquake_count", "ln_extreme_temperature_count")
+# table2_inter <- c("ln_flood_count:is_poor_country", ...)
+# table3_vars <- c("ln_flood_count", ...)
+# table3_inter <- c("ln_flood_count:is_small_country", ...)
+# =====================================
+
 # === Robust helper functions (define ONCE, at the top) ===
 save_table_csv <- function(df, filename) {
   write.csv(df, file = file.path(TABLES_DIR, filename), row.names = FALSE)
 }
+
+# Fonction pour formater les coefficients selon les standards académiques
+format_coeff <- function(coef, se, pval) {
+  if (any(is.na(c(coef, se, pval)))) return("")
+  
+  # Étoiles de significativité
+  stars <- ""
+  if (pval < 0.001) stars <- "***"
+  else if (pval < 0.01) stars <- "**"
+  else if (pval < 0.05) stars <- "*"
+  else if (pval < 0.1) stars <- "°"
+  
+  # Format: coefficient(erreur-type)étoiles
+  sprintf("%.4f%s\n(%.4f)", coef, stars, se)
+}
+
 make_table_df <- function(vars, models, inter_vars = NULL, types = NULL, names = NULL, fixed_effects = "Year, Country×Product, Product×Year") {
   keep <- which(!sapply(models, is.null))
   models <- models[keep]
   n <- length(models)
-  # Correction : s'assurer que vars est de longueur n et ne contient pas NA
+  
+  # S'assurer que tous les vecteurs ont la bonne longueur
   if (!is.null(vars)) vars <- vars[keep]
   if (!is.null(types)) types <- types[keep]
   if (!is.null(names)) names <- names[keep]
   if (!is.null(inter_vars)) inter_vars <- inter_vars[keep]
+  
   safe_extract <- function(i, fun, varname) {
-    if (i > length(models) || is.null(models[[i]]) || is.null(varname) || is.na(varname) || !nzchar(varname)) return(NA)
+    if (i > length(models) || is.null(models[[i]]) || is.null(varname) || is.na(varname) || !nzchar(varname)) return(c(NA, NA, NA))
     fun(models[[i]], varname)
   }
-  # Correction : ne jamais passer NA comme nom de variable
-  main <- unlist(lapply(seq_len(n), function(i) {
+  
+  # Extraire et formater les coefficients principaux
+  main_coeffs <- sapply(seq_len(n), function(i) {
     v <- if (!is.null(vars) && length(vars) >= i) vars[i] else NA
-    if (is.null(v) || is.na(v) || !nzchar(v)) return(NA)
-    format_csv(safe_extract(i, extract_stats, v))
-  }))
-  interaction <- if (!is.null(inter_vars)) unlist(lapply(seq_len(n), function(i) format_csv(safe_extract(i, extract_stats, inter_vars[i])))) else rep(NA, n)
-  control <- unlist(lapply(seq_len(n), function(i) format_csv(safe_extract(i, extract_stats, "d_ln_population"))))
-  r2 <- unlist(lapply(models, function(m) if (!is.null(m)) round(summary(m)$r.squared,4) else NA))
-  obs <- unlist(lapply(models, function(m) if (!is.null(m)) nobs(m) else NA))
-  fe <- rep(fixed_effects, n)
+    if (is.null(v) || is.na(v) || !nzchar(v)) return("")
+    stats <- safe_extract(i, extract_stats, v)
+    if (any(is.na(stats))) return("")
+    format_coeff(stats[1], stats[2], stats[3])
+  })
+  
+  # Extraire et formater les interactions
+  inter_coeffs <- if (!is.null(inter_vars)) {
+    sapply(seq_len(n), function(i) {
+      stats <- safe_extract(i, extract_stats, inter_vars[i])
+      if (any(is.na(stats))) return("")
+      format_coeff(stats[1], stats[2], stats[3])
+    })
+  } else rep("", n)
+  
+  # Extraire R² et observations
+  r2 <- sapply(models, function(m) if (!is.null(m)) round(summary(m)$r.squared, 4) else NA)
+  obs <- sapply(models, function(m) if (!is.null(m)) nobs(m) else NA)
+  
   df <- data.frame(
     Variable = if (!is.null(names)) names else vars,
-    Type = if (!is.null(types)) types else NA,
-    Main = main,
-    Interaction = interaction,
-    Control = control,
+    Type = if (!is.null(types)) types else rep("", n),
+    Main = main_coeffs,
+    Interaction = inter_coeffs,
     R2 = r2,
-    Obs = obs,
-    FixedEffects = fe,
+    Observations = obs,
+    FixedEffects = rep(fixed_effects, n),
     stringsAsFactors = FALSE
   )
   return(df)
@@ -195,8 +246,50 @@ for (period in EXPORT_PERIODS) {
     data$ln_population <- log(data$population)
     data$d_ln_population <- ave(data$ln_population, data$iso3, data$product_code, FUN=function(x) c(NA, diff(x)))
   }
-  # --- FIN création des métriques ---
-
+  
+  # === CRÉATION DES VARIABLES EXTRÊMES POUR TABLES 5 ET 6 ===
+  # 5. Variables d'occurrences par type de catastrophe (ln_*_occurrence)
+  disaster_types_vars <- c("earthquake", "storm", "flood", "extreme_temperature")
+  for (dtype in disaster_types_vars) {
+    event_col <- paste0(dtype, "_events")
+    ln_var <- paste0("ln_", dtype, "_occurrence")
+    if (event_col %in% names(data)) {
+      data[[ln_var]] <- log1p(data[[event_col]])
+    }
+  }
+  
+  # 5b. Variables de mortalité par type de catastrophe (ln_*_deaths)
+  for (dtype in disaster_types_vars) {
+    death_col <- paste0(dtype, "_deaths")
+    ln_var <- paste0("ln_", dtype, "_deaths")
+    if (death_col %in% names(data)) {
+      data[[ln_var]] <- log1p(data[[death_col]])
+    }
+  }
+  
+  # 6. Variables extrêmes EM-DAT (top 10% par nombre de morts)
+  for (dtype in disaster_types_vars) {
+    death_col <- paste0(dtype, "_deaths")
+    extreme_var <- paste0("extreme_", dtype, "_emdat")
+    if (death_col %in% names(data)) {
+      # Calculer le seuil top 10% des morts pour ce type de catastrophe
+      threshold_90p <- quantile(data[[death_col]], 0.9, na.rm=TRUE)
+      data[[extreme_var]] <- ifelse(data[[death_col]] >= threshold_90p & data[[death_col]] > 0, 1, 0)
+      data[[extreme_var]][is.na(data[[death_col]])] <- 0
+    }
+  }
+  
+  # 7. Variables extrêmes GeoMet (top 10% par intensité physique)
+  for (dtype in disaster_types_vars) {
+    intensity_col <- paste0(dtype, "_intensity")
+    extreme_var <- paste0("extreme_", dtype, "_geomet")
+    if (intensity_col %in% names(data)) {
+      # Calculer le seuil top 10% de l'intensité pour ce type de catastrophe
+      threshold_90p <- quantile(data[[intensity_col]], 0.9, na.rm=TRUE)
+      data[[extreme_var]] <- ifelse(data[[intensity_col]] >= threshold_90p & data[[intensity_col]] > 0, 1, 0)
+      data[[extreme_var]][is.na(data[[intensity_col]])] <- 0
+    }
+  }
   # --- Correction : création explicite de data_all et data_agri ---
   if ("is_agri" %in% names(data)) {
     # Correction : conversion robuste de is_agri en booléen natif (AVANT data_all <- data)
@@ -210,6 +303,14 @@ for (period in EXPORT_PERIODS) {
     data_agri <- subset(data, is_agri)
   } else {
     stop("❌ Colonne is_agri absente du dataset, impossible de créer data_agri.")
+  }
+  # --- Filtrage événements significatifs pour Table 1 (conformément à l'article) ---
+  sig_cols <- grep('_sig_', names(data_all), value=TRUE)
+  if (length(sig_cols) > 0) {
+    data_all_sig <- data_all[rowSums(data_all[, sig_cols], na.rm=TRUE) > 0, ]
+    data_agri_sig <- data_agri[rowSums(data_agri[, sig_cols], na.rm=TRUE) > 0, ]
+  } else {
+    stop("❌ Aucune colonne *_sig_* trouvée pour filtrer les événements significatifs.")
   }
   # --- FIN CONFIGURATION DYNAMIQUE ---
 
@@ -254,86 +355,43 @@ for (period in EXPORT_PERIODS) {
   cat("\n==============================\n")
   cat("[TABLE 1] Disasters, exports and poor countries (pooled)\n")
   cat("==============================\n")
-  # Modèles Table 1 - All products (colonnes 1-3)
+  # Table 1 - All products (colonnes 1-3)
   table1_all_models <- list()
-
-  # Colonne 1: Occurrence (All products)
-  if ("ln_total_occurrence" %in% names(data_all)) {
-    table1_all_models$occur <- lm(d_ln_export_value ~ ln_total_occurrence + 
-                                  I(ln_total_occurrence * is_poor_country) + 
-                                  d_ln_population + 
-                                  factor(year) + factor(iso3) + factor(product_code),
-                                  data = data_all)
-  }
-
-  # Colonne 2: Deaths (All products)  
-  if ("ln_total_deaths" %in% names(data_all)) {
-    table1_all_models$deaths <- lm(d_ln_export_value ~ ln_total_deaths + 
-                                  I(ln_total_deaths * is_poor_country) + 
-                                  d_ln_population + 
-                                  factor(year) + factor(iso3) + factor(product_code),
-                                  data = data_all)
-  }
-
-  # Colonne 3: Index (All products)
-  if ("disaster_index" %in% names(data_all)) {
-    table1_all_models$index <- lm(d_ln_export_value ~ disaster_index + 
-                                 I(disaster_index * is_poor_country) + 
-                                 d_ln_population + 
-                                 factor(year) + factor(iso3) + factor(product_code),
-                                 data = data_all)
-  }
-
-  # Modèles Table 1 - Agriculture (colonnes 4-6)
-  table1_agri_models <- list()
-
-  # Colonne 4: Occurrence (Agriculture)
-  if ("ln_total_occurrence" %in% names(data_agri)) {
-    table1_agri_models$occur <- lm(d_ln_export_value ~ ln_total_occurrence + 
-                                  I(ln_total_occurrence * is_poor_country) + 
-                                  d_ln_population + 
-                                  factor(year) + factor(iso3) + factor(product_code),
-                                  data = data_agri)
-  }
-
-  # Colonne 5: Deaths (Agriculture)
-  if ("ln_total_deaths" %in% names(data_agri)) {
-    table1_agri_models$deaths <- lm(d_ln_export_value ~ ln_total_deaths + 
-                                   I(ln_total_deaths * is_poor_country) + 
-                                   d_ln_population + 
-                                   factor(year) + factor(iso3) + factor(product_code),
-                                   data = data_agri)
-  }
-
-  # Colonne 6: Index (Agriculture)
-  if ("disaster_index" %in% names(data_agri)) {
-    table1_agri_models$index <- lm(d_ln_export_value ~ disaster_index + 
-                                  I(disaster_index * is_poor_country) + 
-                                  d_ln_population + 
-                                  factor(year) + factor(iso3) + factor(product_code),
-                                  data = data_agri)
-  }
-
-  table1_vars <- c("ln_total_occurrence", "ln_total_deaths", "disaster_index")
-  # DEBUG: Afficher les noms de coefficients pour chaque modèle Agriculture et la variable recherchée
-  cat("\n[DEBUG] Coefficients et variable recherchée pour chaque modèle Agriculture (Table 1):\n")
-  for (i in seq_along(table1_agri_models)) {
-    mod <- table1_agri_models[[i]]
-    var <- table1_vars[i]
-    if (!is.null(mod)) {
-      cat(paste0("  - Modèle ", names(table1_agri_models)[i], ": variable recherchée '", var, "'\n"))
-      cat(paste0("    Coefs: ", paste(rownames(summary(mod)$coefficients), collapse=", "), "\n"))
+  for (i in seq_along(metric_table1_all)) {
+    var <- metric_table1_all[i]
+    if (var %in% names(data_all_sig)) {
+      # Créer formule dynamique avec nom de variable correct
+      formula_str <- paste0("d_ln_export_value ~ ", var, " + I(", var, " * is_poor_country) + d_ln_population + factor(year) + factor(iso3) + factor(product_code)")
+      table1_all_models[[var]] <- lm(as.formula(formula_str), data = data_all_sig)
     } else {
-      cat(paste0("  - Modèle ", names(table1_agri_models)[i], ": NULL\n"))
+      table1_all_models[[var]] <- NULL
     }
   }
 
-  # Combiner tous modèles Table 1
+  # Table 1 - Agriculture (colonnes 4-6)
+  table1_agri_models <- list()
+  for (i in seq_along(metric_table1_agri)) {
+    var <- metric_table1_agri[i]
+    if (var %in% names(data_agri_sig)) {
+      # Créer formule dynamique avec nom de variable correct
+      formula_str <- paste0("d_ln_export_value ~ ", var, " + I(", var, " * is_poor_country) + d_ln_population + factor(year) + factor(iso3) + factor(product_code)")
+      table1_agri_models[[var]] <- lm(as.formula(formula_str), data = data_agri_sig)
+    } else {
+      table1_agri_models[[var]] <- NULL
+    }
+  }
+
+  # Combine models and variable names for Table 1
   table1_models <- c(table1_all_models, table1_agri_models)
-  # Correction : le vecteur vars doit être dupliqué pour All et Agriculture
-  table1_vars <- rep(c("ln_total_occurrence", "ln_total_deaths", "disaster_index"), 2)
+  table1_vars <- c(metric_table1_all, metric_table1_agri)
   table1_names <- table1_vars
-  table1_types <- c(rep("All", 3), rep("Agriculture", 3))
+  table1_types <- c(rep("All", length(metric_table1_all)), rep("Agriculture", length(metric_table1_agri)))
+  # Définir les variables d'interaction pour Table 1
+  table1_inter_vars <- c(
+    paste0("I(", metric_table1_all, " * is_poor_country)"),
+    paste0("I(", metric_table1_agri, " * is_poor_country)")
+  )
+
   # --- Helper functions for table formatting (ensure they exist before use) ---
   format_csv <- function(x) {
     if (is.null(x) || all(is.na(x))) return(NA)
@@ -359,11 +417,14 @@ for (period in EXPORT_PERIODS) {
         est <- coefs[matches[1], 1]
         se <- coefs[matches[1], 2]
         pval <- coefs[matches[1], 4]
-        cat(sprintf("[DEBUG] Coefficient '%s' non trouvé, matching partiel sur '%s' → '%s'\n", var, var, matches[1]))
-        return(c(est, se, pval))
+        cat(sprintf(
+          "[DEBUG] Coefficient '%s' non trouvé, matching partiel sur '%s' → '%s'\n",
+          var, var, matches[1]
+        ))
+        c(est, se, pval)
       } else {
-        cat(sprintf("[DEBUG] Coefficient '%s' non trouvé dans : %s\n", var, paste(rownames(coefs), collapse=", ")))
-        return(NA)
+        cat(sprintf("[DEBUG] Coefficient '%s' non trouvé", var))
+        NA
       }
     }
   }
@@ -373,17 +434,71 @@ for (period in EXPORT_PERIODS) {
     vars = table1_vars,
     models = table1_models,
     types = table1_types,
-    names = table1_names
+    names = table1_names,
+    inter_vars = table1_inter_vars
   )
   print(table1_df)
-  save_table_csv(table1_df, paste0("table1_disasters_exports_poor_", period_str, ".csv"))
-  cat("[INFO] Table 1 sauvegardée sous:", file.path(TABLES_DIR, paste0("table1_disasters_exports_poor_", period_str, ".csv")), "\n")
+  # Le nom du fichier de sortie inclut la métrique principale (concaténée)
+  metric_id <- paste(table1_vars, collapse="-")
+  table1_filename <- paste0("table1_disasters_exports_poor_", period_str, "_", metric_id, ".csv")
+  save_table_csv(table1_df, table1_filename)
+  cat("[INFO] Table 1 sauvegardée sous:", file.path(TABLES_DIR, table1_filename), "\n")
   cat("[END] Table 1\n--------------------\n")
 
   # --- TABLE 2 ---
   cat("\n==============================\n")
   cat("[TABLE 2] Types × poor countries\n")
   cat("==============================\n")
+  # === GÉNÉRATION DES MODÈLES POUR TABLES 2 ET 3 ===
+  # Table 2: Types de catastrophes × pays pauvres (agriculture)
+  # ANALYSE DÉSAGRÉGÉE : 2 variables par type (Occurrence + Human Deaths)
+  disaster_types_t2t3 <- c("flood", "storm", "earthquake", "extreme_temperature")
+  
+  # Variables pour Table 2 : Occurrence ET Deaths pour chaque type
+  table2_vars_occurrence <- paste0("ln_", disaster_types_t2t3, "_occurrence")
+  table2_vars_deaths <- paste0("ln_", disaster_types_t2t3, "_deaths")
+  table2_vars <- c()
+  # Entrelacement : flood_occ, flood_deaths, storm_occ, storm_deaths, etc.
+  for (i in seq_along(disaster_types_t2t3)) {
+    table2_vars <- c(table2_vars, table2_vars_occurrence[i], table2_vars_deaths[i])
+  }
+  
+  # Variables d'interaction correspondantes
+  table2_inter <- c()
+  for (i in seq_along(disaster_types_t2t3)) {
+    table2_inter <- c(table2_inter, 
+                      paste0("I(", table2_vars_occurrence[i], " * is_poor_country)"),
+                      paste0("I(", table2_vars_deaths[i], " * is_poor_country)"))
+  }
+  
+  table2_models <- list()
+  
+  for (i in seq_along(table2_vars)) {
+    var <- table2_vars[i]
+    if (var %in% names(data_agri)) {
+      formula_str <- paste0("d_ln_export_value ~ ", var, " + I(", var, " * is_poor_country) + d_ln_population + factor(year) + factor(iso3) + factor(product_code)")
+      table2_models[[var]] <- tryCatch(lm(as.formula(formula_str), data = data_agri), error = function(e) NULL)
+    } else {
+      cat("[WARN] Variable manquante pour Table 2:", var, "\n")
+      table2_models[[var]] <- NULL
+    }
+  }
+  
+  # Table 3: Types de catastrophes × petits pays (agriculture)
+  table3_vars <- paste0("ln_", disaster_types_t2t3, "_occurrence")
+  table3_inter <- paste0("I(ln_", disaster_types_t2t3, "_occurrence * is_small_country)")
+  table3_models <- list()
+  
+  for (i in seq_along(disaster_types_t2t3)) {
+    var <- table3_vars[i]
+    if (var %in% names(data_agri)) {
+      formula_str <- paste0("d_ln_export_value ~ ", var, " + I(", var, " * is_small_country) + d_ln_population + factor(year) + factor(iso3) + factor(product_code)")
+      table3_models[[var]] <- tryCatch(lm(as.formula(formula_str), data = data_agri), error = function(e) NULL)
+    } else {
+      table3_models[[var]] <- NULL
+    }
+  }
+
   if (exists("table2_models") && exists("table2_vars") && exists("table2_inter")) {
     cat("[TABLE 2] Construction de table2_df\n")
     table2_df <- make_table_df(
@@ -392,8 +507,10 @@ for (period in EXPORT_PERIODS) {
       inter_vars = table2_inter
     )
     print(table2_df)
-    save_table_csv(table2_df, paste0("table2_types_poor_", period_str, ".csv"))
-    cat("[INFO] Table 2 sauvegardée sous:", file.path(TABLES_DIR, paste0("table2_types_poor_", period_str, ".csv")), "\n")
+    # Nom de fichier simplifié
+    table2_filename <- paste0("table2_types_poor_", period_str, "_ln_flood_occurrence_ln_storm_occurrence_ln_earthquake_occurrence_ln_extreme_temperature_occurrence.csv")
+    save_table_csv(table2_df, table2_filename)
+    cat("[INFO] Table 2 sauvegardée sous:", file.path(TABLES_DIR, table2_filename), "\n")
     # --- Génération automatique du .tex pour Table 2 ---
     tex_path <- file.path(project_root, "memoire/tables/table2_types_poor.tex")
     cat("% Table générée automatiquement depuis pipeline/04_econometric_analysis.R le ", format(Sys.time(), "%Y-%m-%d %H:%M"), "\n", file=tex_path)
@@ -423,17 +540,21 @@ for (period in EXPORT_PERIODS) {
       inter_vars = table3_inter
     )
     print(table3_df)
-    save_table_csv(table3_df, paste0("table3_types_small_", period_str, ".csv"))
-    cat("[INFO] Table 3 sauvegardée sous:", file.path(TABLES_DIR, paste0("table3_types_small_", period_str, ".csv")), "\n")
+    # Ajout du label de métrique dans le nom du fichier
+    table3_metric_label <- if (exists("table3_metric_label")) table3_metric_label else paste(table3_vars, collapse="_")
+    save_table_csv(table3_df, paste0("table3_types_small_", period_str, "_", table3_metric_label, ".csv"))
+    cat("[INFO] Table 3 sauvegardée sous:", file.path(TABLES_DIR, paste0("table3_types_small_", period_str, "_", table3_metric_label, ".csv")), "\n")
   } else {
     cat("[TABLE 3][WARN] Modèles ou variables manquants, table non générée.\n")
   }
   cat("[END] Table 3\n--------------------\n")
 
-  # === TABLE 5: extreme disasters (top 10% EM-DAT) ===
+  # === TABLE 5: Extreme disasters (top 10% human damage, EM-DAT) ===
   cat("\n==============================\n")
-  cat("[TABLE 5] Extreme disasters (top 10% EM-DAT)\n")
+  cat("[TABLE 5] Extreme disasters (top 10% human damage, EM-DAT)\n")
   cat("==============================\n")
+  
+  # Variables d'interaction pour catastrophes extrêmes EM-DAT
   disaster_types <- c("flood", "storm", "earthquake", "extreme_temperature")
   table5_vars <- rep(disaster_types, each=2)
   table5_type <- rep(c("Poor", "Small"), times=length(disaster_types))
@@ -441,79 +562,307 @@ for (period in EXPORT_PERIODS) {
     v <- table5_vars[i]
     type <- table5_type[i]
     extreme_var <- paste0("extreme_", v, "_emdat")
-    if (extreme_var %in% names(data_agri) && paste0("ln_", v, "_occurrence") %in% names(data_agri)) {
+    ln_occurrence_var <- paste0("ln_", v, "_occurrence")
+    
+    if (extreme_var %in% names(data_agri) && ln_occurrence_var %in% names(data_agri)) {
       if (type == "Poor") {
-        lm(d_ln_export_value ~ get(extreme_var) * is_poor_country + get(paste0("ln_", v, "_occurrence")) + d_ln_population + factor(year) + factor(iso3) + factor(product_code), data = data_agri)
+        formula_str <- paste0("d_ln_export_value ~ ", extreme_var, " * is_poor_country + ", ln_occurrence_var, " + d_ln_population + factor(year) + factor(iso3) + factor(product_code)")
+        tryCatch(lm(as.formula(formula_str), data = data_agri), error = function(e) NULL)
       } else {
-        lm(d_ln_export_value ~ get(extreme_var) * is_small_country + get(paste0("ln_", v, "_occurrence")) + d_ln_population + factor(year) + factor(iso3) + factor(product_code), data = data_agri)
+        formula_str <- paste0("d_ln_export_value ~ ", extreme_var, " * is_small_country + ", ln_occurrence_var, " + d_ln_population + factor(year) + factor(iso3) + factor(product_code)")
+        tryCatch(lm(as.formula(formula_str), data = data_agri), error = function(e) NULL)
       }
     } else {
       NULL
     }
   })
-  table5_main <- unlist(lapply(seq_along(table5_models), function(i) format_csv(extract_stats(table5_models[[i]], paste0("ln_", table5_vars[i], "_occurrence")))))
+  
+  # Extraction des interactions
   table5_inter <- unlist(lapply(seq_along(table5_models), function(i) {
     v <- table5_vars[i]
     type <- table5_type[i]
     if (type=="Poor") format_csv(extract_stats(table5_models[[i]], paste0("extreme_", v, "_emdat:is_poor_country")))
     else format_csv(extract_stats(table5_models[[i]], paste0("extreme_", v, "_emdat:is_small_country")))
   }))
+  
   table5_df <- data.frame(
     Disaster = table5_vars,
     Type = table5_type,
-    Main = table5_main,
+    Main = unlist(lapply(seq_along(table5_models), function(i) format_csv(extract_stats(table5_models[[i]], paste0("extreme_", table5_vars[i], "_emdat"))))),
     Interaction = table5_inter,
     Control = unlist(lapply(seq_along(table5_models), function(i) format_csv(extract_stats(table5_models[[i]], "d_ln_population")))),
     R2 = unlist(lapply(table5_models, function(m) if (!is.null(m)) round(summary(m)$r.squared,4) else NA)),
     Obs = unlist(lapply(table5_models, function(m) if (!is.null(m)) nobs(m) else NA)),
     FixedEffects = rep("Year, Country×Product, Product×Year", length(table5_vars))
   )
+  
   print(table5_df)
   save_table_csv(table5_df, paste0("table5_extreme_emdat_", period_str, ".csv"))
   cat("[INFO] Table 5 sauvegardée sous:", file.path(TABLES_DIR, paste0("table5_extreme_emdat_", period_str, ".csv")), "\n")
   cat("[END] Table 5\n--------------------\n")
 
-  # === TABLE 6: extreme disasters (top 10% GeoMet) ===
+  # === TABLE 6: Extreme disasters (top 10% physical damage, GeoMet) ===
   cat("\n==============================\n")
-  cat("[TABLE 6] Extreme disasters (top 10% GeoMet)\n")
+  cat("[TABLE 6] Extreme disasters (top 10% physical damage, GeoMet)\n")
   cat("==============================\n")
+  
+  # Variables d'interaction pour catastrophes extrêmes GeoMet
   table6_vars <- rep(disaster_types, each=2)
   table6_type <- rep(c("Poor", "Small"), times=length(disaster_types))
   table6_models <- lapply(seq_along(table6_vars), function(i) {
     v <- table6_vars[i]
     type <- table6_type[i]
     extreme_var <- paste0("extreme_", v, "_geomet")
-    if (extreme_var %in% names(data_agri) && paste0("ln_", v, "_occurrence") %in% names(data_agri)) {
+    ln_occurrence_var <- paste0("ln_", v, "_occurrence")
+    
+    if (extreme_var %in% names(data_agri) && ln_occurrence_var %in% names(data_agri)) {
       if (type == "Poor") {
-        lm(d_ln_export_value ~ get(extreme_var) * is_poor_country + get(paste0("ln_", v, "_occurrence")) + d_ln_population + factor(year) + factor(iso3) + factor(product_code), data = data_agri)
+        formula_str <- paste0("d_ln_export_value ~ ", extreme_var, " * is_poor_country + ", ln_occurrence_var, " + d_ln_population + factor(year) + factor(iso3) + factor(product_code)")
+        tryCatch(lm(as.formula(formula_str), data = data_agri), error = function(e) NULL)
       } else {
-        lm(d_ln_export_value ~ get(extreme_var) * is_small_country + get(paste0("ln_", v, "_occurrence")) + d_ln_population + factor(year) + factor(iso3) + factor(product_code), data = data_agri)
+        formula_str <- paste0("d_ln_export_value ~ ", extreme_var, " * is_small_country + ", ln_occurrence_var, " + d_ln_population + factor(year) + factor(iso3) + factor(product_code)")
+        tryCatch(lm(as.formula(formula_str), data = data_agri), error = function(e) NULL)
       }
     } else {
       NULL
     }
   })
-  table6_main <- unlist(lapply(seq_along(table6_models), function(i) format_csv(extract_stats(table6_models[[i]], paste0("ln_", table6_vars[i], "_occurrence")))))
+  
+  # Extraction des interactions
   table6_inter <- unlist(lapply(seq_along(table6_models), function(i) {
     v <- table6_vars[i]
     type <- table6_type[i]
     if (type=="Poor") format_csv(extract_stats(table6_models[[i]], paste0("extreme_", v, "_geomet:is_poor_country")))
     else format_csv(extract_stats(table6_models[[i]], paste0("extreme_", v, "_geomet:is_small_country")))
   }))
+  
   table6_df <- data.frame(
     Disaster = table6_vars,
     Type = table6_type,
-    Main = table6_main,
+    Main = unlist(lapply(seq_along(table6_models), function(i) format_csv(extract_stats(table6_models[[i]], paste0("extreme_", table6_vars[i], "_geomet"))))),
     Interaction = table6_inter,
     Control = unlist(lapply(seq_along(table6_models), function(i) format_csv(extract_stats(table6_models[[i]], "d_ln_population")))),
     R2 = unlist(lapply(table6_models, function(m) if (!is.null(m)) round(summary(m)$r.squared,4) else NA)),
     Obs = unlist(lapply(table6_models, function(m) if (!is.null(m)) nobs(m) else NA)),
     FixedEffects = rep("Year, Country×Product, Product×Year", length(table6_vars))
   )
+  
   print(table6_df)
   save_table_csv(table6_df, paste0("table6_extreme_geomet_", period_str, ".csv"))
   cat("[INFO] Table 6 sauvegardée sous:", file.path(TABLES_DIR, paste0("table6_extreme_geomet_", period_str, ".csv")), "\n")
   cat("[END] Table 6\n--------------------\n")
+
+  # === TABLE 4: Comparison EM-DAT vs GeoMet (synthesis) ===
+  cat("\n==============================\n")
+  cat("[TABLE 4] Comparison EM-DAT vs GeoMet (synthesis)\n")
+  cat("==============================\n")
+  
+  # Création d'une table de synthèse comparant les résultats EM-DAT et GeoMet
+  disaster_types_t4 <- c("flood", "storm", "earthquake", "extreme_temperature")
+  table4_comparison <- data.frame()
+  
+  for (dtype in disaster_types_t4) {
+    # Extraire les coefficients principaux des Tables 5 et 6 pour ce type de catastrophe
+    table5_rows <- table5_df[table5_df$Disaster == dtype, ]
+    table6_rows <- table6_df[table6_df$Disaster == dtype, ]
+    
+    if (nrow(table5_rows) > 0 && nrow(table6_rows) > 0) {
+      for (country_type in c("Poor", "Small")) {
+        t5_row <- table5_rows[table5_rows$Type == country_type, ]
+        t6_row <- table6_rows[table6_rows$Type == country_type, ]
+        
+        if (nrow(t5_row) > 0 && nrow(t6_row) > 0) {
+          # Extraire les coefficients d'interaction
+          t5_coef <- tryCatch({
+            as.numeric(strsplit(as.character(t5_row$Interaction), ", ")[[1]][1])
+          }, error = function(e) NA)
+          
+          t6_coef <- tryCatch({
+            as.numeric(strsplit(as.character(t6_row$Interaction), ", ")[[1]][1])
+          }, error = function(e) NA)
+          
+          table4_comparison <- rbind(table4_comparison, data.frame(
+            Disaster = dtype,
+            Type = country_type,
+            EMDAT_Coef = t5_coef,
+            GeoMet_Coef = t6_coef,
+            Difference = t5_coef - t6_coef,
+            Period = period_str,
+            stringsAsFactors = FALSE
+          ))
+        }
+      }
+    }
+  }
+  
+  print(table4_comparison)
+  save_table_csv(table4_comparison, paste0("table4_comparison_emdat_geomet_", period_str, ".csv"))
+  cat("[INFO] Table 4 sauvegardée sous:", file.path(TABLES_DIR, paste0("table4_comparison_emdat_geomet_", period_str, ".csv")), "\n")
+  cat("[END] Table 4\n--------------------\n")
+
+  # === TABLE 7: Comparison extreme disasters (synthesis) ===
+  cat("\n==============================\n")
+  cat("[TABLE 7] Comparison extreme disasters (synthesis)\n")
+  cat("==============================\n")
+  
+  # Table de synthèse des catastrophes extrêmes
+  table7_summary <- data.frame()
+  
+  for (dtype in disaster_types_t4) {
+    # Statistiques descriptives des variables extrêmes
+    extreme_emdat_var <- paste0("extreme_", dtype, "_emdat")
+    extreme_geomet_var <- paste0("extreme_", dtype, "_geomet")
+    
+    if (extreme_emdat_var %in% names(data_agri) && extreme_geomet_var %in% names(data_agri)) {
+      emdat_events <- sum(data_agri[[extreme_emdat_var]], na.rm = TRUE)
+      geomet_events <- sum(data_agri[[extreme_geomet_var]], na.rm = TRUE)
+      total_obs <- nrow(data_agri)
+      
+      table7_summary <- rbind(table7_summary, data.frame(
+        Disaster = dtype,
+        EMDAT_Extreme_Events = emdat_events,
+        EMDAT_Percentage = round((emdat_events / total_obs) * 100, 2),
+        GeoMet_Extreme_Events = geomet_events,
+        GeoMet_Percentage = round((geomet_events / total_obs) * 100, 2),
+        Total_Observations = total_obs,
+        Period = period_str,
+        stringsAsFactors = FALSE
+      ))
+    }
+  }
+  
+  print(table7_summary)
+  save_table_csv(table7_summary, paste0("table7_extreme_disasters_summary_", period_str, ".csv"))
+  cat("[INFO] Table 7 sauvegardée sous:", file.path(TABLES_DIR, paste0("table7_extreme_disasters_summary_", period_str, ".csv")), "\n")
+  cat("[END] Table 7\n--------------------\n")
+
+  # === TABLE A1: Extreme disasters (top 20% human damage) - Appendix ===
+  cat("\n==============================\n")
+  cat("[TABLE A1] Extreme disasters (top 20% human damage) - Appendix\n")
+  cat("==============================\n")
+  
+  # Recréer les variables extrêmes avec seuil 20% (top 80% quantile)
+  for (dtype in disaster_types_vars) {
+    death_col <- paste0(dtype, "_deaths")
+    extreme_var_a1 <- paste0("extreme_", dtype, "_emdat_20p")
+    if (death_col %in% names(data)) {
+      threshold_80p <- quantile(data[[death_col]], 0.8, na.rm=TRUE)
+      data[[extreme_var_a1]] <- ifelse(data[[death_col]] >= threshold_80p & data[[death_col]] > 0, 1, 0)
+      data[[extreme_var_a1]][is.na(data[[death_col]])] <- 0
+    }
+  }
+  
+  # Recréer data_agri avec les nouvelles variables
+  data_agri_a1 <- subset(data, is_agri)
+  
+  tableA1_vars <- rep(disaster_types, each=2)
+  tableA1_type <- rep(c("Poor", "Small"), times=length(disaster_types))
+  tableA1_models <- lapply(seq_along(tableA1_vars), function(i) {
+    v <- tableA1_vars[i]
+    type <- tableA1_type[i]
+    extreme_var <- paste0("extreme_", v, "_emdat_20p")
+    ln_occurrence_var <- paste0("ln_", v, "_occurrence")
+    
+    if (extreme_var %in% names(data_agri_a1) && ln_occurrence_var %in% names(data_agri_a1)) {
+      if (type == "Poor") {
+        formula_str <- paste0("d_ln_export_value ~ ", extreme_var, " * is_poor_country + ", ln_occurrence_var, " + d_ln_population + factor(year) + factor(iso3) + factor(product_code)")
+        tryCatch(lm(as.formula(formula_str), data = data_agri_a1), error = function(e) NULL)
+      } else {
+        formula_str <- paste0("d_ln_export_value ~ ", extreme_var, " * is_small_country + ", ln_occurrence_var, " + d_ln_population + factor(year) + factor(iso3) + factor(product_code)")
+        tryCatch(lm(as.formula(formula_str), data = data_agri_a1), error = function(e) NULL)
+      }
+    } else {
+      NULL
+    }
+  })
+  
+  tableA1_main <- unlist(lapply(seq_along(tableA1_models), function(i) format_csv(extract_stats(tableA1_models[[i]], paste0("ln_", tableA1_vars[i], "_occurrence")))))
+  tableA1_inter <- unlist(lapply(seq_along(tableA1_models), function(i) {
+    v <- tableA1_vars[i]
+    type <- tableA1_type[i]
+    if (type=="Poor") format_csv(extract_stats(tableA1_models[[i]], paste0("extreme_", v, "_emdat_20p:is_poor_country")))
+    else format_csv(extract_stats(tableA1_models[[i]], paste0("extreme_", v, "_emdat_20p:is_small_country")))
+  }))
+  
+  tableA1_df <- data.frame(
+    Disaster = tableA1_vars,
+    Type = tableA1_type,
+    Main = tableA1_main,
+    Interaction = tableA1_inter,
+    Control = unlist(lapply(seq_along(tableA1_models), function(i) format_csv(extract_stats(tableA1_models[[i]], "d_ln_population")))),
+    R2 = unlist(lapply(tableA1_models, function(m) if (!is.null(m)) round(summary(m)$r.squared,4) else NA)),
+    Obs = unlist(lapply(tableA1_models, function(m) if (!is.null(m)) nobs(m) else NA)),
+    FixedEffects = rep("Year, Country×Product, Product×Year", length(tableA1_vars))
+  )
+  
+  print(tableA1_df)
+  save_table_csv(tableA1_df, paste0("tableA1_extreme_emdat_20p_", period_str, ".csv"))
+  cat("[INFO] Table A1 sauvegardée sous:", file.path(TABLES_DIR, paste0("tableA1_extreme_emdat_20p_", period_str, ".csv")), "\n")
+  cat("[END] Table A1\n--------------------\n")
+
+  # === TABLE A2: Extreme disasters (top 20% physical damage) - Appendix ===
+  cat("\n==============================\n")
+  cat("[TABLE A2] Extreme disasters (top 20% physical damage) - Appendix\n")
+  cat("==============================\n")
+  
+  # Variables extrêmes GeoMet avec seuil 20% (top 80% quantile)
+  for (dtype in disaster_types_vars) {
+    intensity_col <- paste0(dtype, "_intensity")
+    extreme_var_a2 <- paste0("extreme_", dtype, "_geomet_20p")
+    if (intensity_col %in% names(data)) {
+      threshold_80p <- quantile(data[[intensity_col]], 0.8, na.rm=TRUE)
+      data[[extreme_var_a2]] <- ifelse(data[[intensity_col]] >= threshold_80p & data[[intensity_col]] > 0, 1, 0)
+      data[[extreme_var_a2]][is.na(data[[intensity_col]])] <- 0
+    }
+  }
+  
+  # Recréer data_agri avec les nouvelles variables
+  data_agri_a2 <- subset(data, is_agri)
+  
+  tableA2_vars <- rep(disaster_types, each=2)
+  tableA2_type <- rep(c("Poor", "Small"), times=length(disaster_types))
+  tableA2_models <- lapply(seq_along(tableA2_vars), function(i) {
+    v <- tableA2_vars[i]
+    type <- tableA2_type[i]
+    extreme_var <- paste0("extreme_", v, "_geomet_20p")
+    ln_occurrence_var <- paste0("ln_", v, "_occurrence")
+    
+    if (extreme_var %in% names(data_agri_a2) && ln_occurrence_var %in% names(data_agri_a2)) {
+      if (type == "Poor") {
+        formula_str <- paste0("d_ln_export_value ~ ", extreme_var, " * is_poor_country + ", ln_occurrence_var, " + d_ln_population + factor(year) + factor(iso3) + factor(product_code)")
+        tryCatch(lm(as.formula(formula_str), data = data_agri_a2), error = function(e) NULL)
+      } else {
+        formula_str <- paste0("d_ln_export_value ~ ", extreme_var, " * is_small_country + ", ln_occurrence_var, " + d_ln_population + factor(year) + factor(iso3) + factor(product_code)")
+        tryCatch(lm(as.formula(formula_str), data = data_agri_a2), error = function(e) NULL)
+      }
+    } else {
+      NULL
+    }
+  })
+  
+  tableA2_main <- unlist(lapply(seq_along(tableA2_models), function(i) format_csv(extract_stats(tableA2_models[[i]], paste0("ln_", tableA2_vars[i], "_occurrence")))))
+  tableA2_inter <- unlist(lapply(seq_along(tableA2_models), function(i) {
+    v <- tableA2_vars[i]
+    type <- tableA2_type[i]
+    if (type=="Poor") format_csv(extract_stats(tableA2_models[[i]], paste0("extreme_", v, "_geomet_20p:is_poor_country")))
+    else format_csv(extract_stats(tableA2_models[[i]], paste0("extreme_", v, "_geomet_20p:is_small_country")))
+  }))
+  
+  tableA2_df <- data.frame(
+    Disaster = tableA2_vars,
+    Type = tableA2_type,
+    Main = tableA2_main,
+    Interaction = tableA2_inter,
+    Control = unlist(lapply(seq_along(tableA2_models), function(i) format_csv(extract_stats(tableA2_models[[i]], "d_ln_population")))),
+    R2 = unlist(lapply(tableA2_models, function(m) if (!is.null(m)) round(summary(m)$r.squared,4) else NA)),
+    Obs = unlist(lapply(tableA2_models, function(m) if (!is.null(m)) nobs(m) else NA)),
+    FixedEffects = rep("Year, Country×Product, Product×Year", length(tableA2_vars))
+  )
+  
+  print(tableA2_df)
+  save_table_csv(tableA2_df, paste0("tableA2_extreme_geomet_20p_", period_str, ".csv"))
+  cat("[INFO] Table A2 sauvegardée sous:", file.path(TABLES_DIR, paste0("tableA2_extreme_geomet_20p_", period_str, ".csv")), "\n")
+  cat("[END] Table A2\n--------------------\n")
 
   # =====================
   # TABLES AVANCÉES (ex-04b, désormais intégrées)
@@ -641,7 +990,5 @@ for (period in EXPORT_PERIODS) {
   write.csv(results_summary, file.path(RESULTS_DIR, paste0("article_reproduction_summary_", period_str, ".csv")), row.names = FALSE)
   cat("\n==============================\n")
   cat("[RÉSUMÉ] Analyse économétrique terminée pour période ", period_str, "\n")
-  cat("==============================\n")
-  cat("\n[INFO] Pour les analyses multi-périodes et robustesse, lancez le script 04b_multi_period_analysis.R\n")
-}
+  cat("==============================\n")}
 # Fin du script
