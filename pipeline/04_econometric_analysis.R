@@ -396,7 +396,24 @@ for (period in EXPORT_PERIODS) {
   format_csv <- function(x) {
     if (is.null(x) || all(is.na(x))) return(NA)
     if (is.list(x)) x <- unlist(x)
-    paste(x, collapse = ", ")
+    # Retourner seulement la première valeur (coefficient) au lieu de concaténer
+    if (length(x) > 0) return(x[1])
+    return(NA)
+  }
+  
+  # Nouvelle fonction pour formater proprement les coefficients (simple, sans newlines)
+  format_coeff_clean <- function(coef, se, pval) {
+    if (any(is.na(c(coef, se, pval)))) return("Model failed")
+    
+    # Étoiles de significativité
+    stars <- ""
+    if (pval < 0.001) stars <- "***"
+    else if (pval < 0.01) stars <- "**"
+    else if (pval < 0.05) stars <- "*"
+    else if (pval < 0.1) stars <- "°"
+    
+    # Format simple: coefficient avec étoiles (pas de newlines)
+    sprintf("%.6f%s", coef, stars)
   }
   # Nouvelle version robuste de extract_stats avec matching partiel et debug
   extract_stats <- function(model, var) {
@@ -566,23 +583,61 @@ for (period in EXPORT_PERIODS) {
     }
   })
   
-  # Extraction des interactions
-  table5_inter <- unlist(lapply(seq_along(table5_models), function(i) {
+  # Construction propre de la table 5 (comme dans 04b)
+  table5_main_effects <- character(length(table5_models))
+  table5_interactions <- character(length(table5_models))
+  table5_r2 <- numeric(length(table5_models))
+  table5_obs <- integer(length(table5_models))
+  
+  for (i in seq_along(table5_models)) {
+    model <- table5_models[[i]]
     v <- table5_vars[i]
     type <- table5_type[i]
-    if (type=="Poor") format_csv(extract_stats(table5_models[[i]], paste0("extreme_", v, "_emdat:is_poor_country")))
-    else format_csv(extract_stats(table5_models[[i]], paste0("extreme_", v, "_emdat:is_small_country")))
-  }))
-  
+    
+    if (is.null(model)) {
+      table5_main_effects[i] <- "Model failed"
+      table5_interactions[i] <- "Model failed" 
+      table5_r2[i] <- NA
+      table5_obs[i] <- 0
+      next
+    }
+    
+    # Effet principal
+    main_var <- paste0("extreme_", v, "_emdat")
+    main_stats <- extract_stats(model, main_var)
+    if (all(!is.na(main_stats))) {
+      table5_main_effects[i] <- format_coeff_clean(main_stats[1], main_stats[2], main_stats[3])
+    } else {
+      table5_main_effects[i] <- "Not found"
+    }
+    
+    # Interaction
+    inter_var <- if (type == "Poor") {
+      paste0("extreme_", v, "_emdat:is_poor_country")
+    } else {
+      paste0("extreme_", v, "_emdat:is_small_country")
+    }
+    inter_stats <- extract_stats(model, inter_var)
+    if (all(!is.na(inter_stats))) {
+      table5_interactions[i] <- format_coeff_clean(inter_stats[1], inter_stats[2], inter_stats[3])
+    } else {
+      table5_interactions[i] <- "Not found"
+    }
+    
+    # R² et observations
+    table5_r2[i] <- round(summary(model)$r.squared, 4)
+    table5_obs[i] <- nobs(model)
+  }
+
   table5_df <- data.frame(
     Disaster = table5_vars,
     Type = table5_type,
-    Main = unlist(lapply(seq_along(table5_models), function(i) format_csv(extract_stats(table5_models[[i]], paste0("extreme_", table5_vars[i], "_emdat"))))),
-    Interaction = table5_inter,
-    Control = unlist(lapply(seq_along(table5_models), function(i) format_csv(extract_stats(table5_models[[i]], "d_ln_population")))),
-    R2 = unlist(lapply(table5_models, function(m) if (!is.null(m)) round(summary(m)$r.squared,4) else NA)),
-    Obs = unlist(lapply(table5_models, function(m) if (!is.null(m)) nobs(m) else NA)),
-    FixedEffects = rep("Year, Country×Product, Product×Year", length(table5_vars))
+    Main = table5_main_effects,
+    Interaction = table5_interactions,
+    R2 = table5_r2,
+    Observations = table5_obs,
+    FixedEffects = rep("Year, Country×Product, Product×Year", length(table5_vars)),
+    stringsAsFactors = FALSE
   )
   
   print(table5_df)
@@ -617,23 +672,61 @@ for (period in EXPORT_PERIODS) {
     }
   })
   
-  # Extraction des interactions
-  table6_inter <- unlist(lapply(seq_along(table6_models), function(i) {
+  # Construction propre de la table 6 (comme dans 04b)
+  table6_main_effects <- character(length(table6_models))
+  table6_interactions <- character(length(table6_models))
+  table6_r2 <- numeric(length(table6_models))
+  table6_obs <- integer(length(table6_models))
+  
+  for (i in seq_along(table6_models)) {
+    model <- table6_models[[i]]
     v <- table6_vars[i]
     type <- table6_type[i]
-    if (type=="Poor") format_csv(extract_stats(table6_models[[i]], paste0("extreme_", v, "_geomet:is_poor_country")))
-    else format_csv(extract_stats(table6_models[[i]], paste0("extreme_", v, "_geomet:is_small_country")))
-  }))
-  
+    
+    if (is.null(model)) {
+      table6_main_effects[i] <- "Model failed"
+      table6_interactions[i] <- "Model failed" 
+      table6_r2[i] <- NA
+      table6_obs[i] <- 0
+      next
+    }
+    
+    # Effet principal
+    main_var <- paste0("extreme_", v, "_geomet")
+    main_stats <- extract_stats(model, main_var)
+    if (all(!is.na(main_stats))) {
+      table6_main_effects[i] <- format_coeff_clean(main_stats[1], main_stats[2], main_stats[3])
+    } else {
+      table6_main_effects[i] <- "Not found"
+    }
+    
+    # Interaction
+    inter_var <- if (type == "Poor") {
+      paste0("extreme_", v, "_geomet:is_poor_country")
+    } else {
+      paste0("extreme_", v, "_geomet:is_small_country")
+    }
+    inter_stats <- extract_stats(model, inter_var)
+    if (all(!is.na(inter_stats))) {
+      table6_interactions[i] <- format_coeff_clean(inter_stats[1], inter_stats[2], inter_stats[3])
+    } else {
+      table6_interactions[i] <- "Not found"
+    }
+    
+    # R² et observations
+    table6_r2[i] <- round(summary(model)$r.squared, 4)
+    table6_obs[i] <- nobs(model)
+  }
+
   table6_df <- data.frame(
     Disaster = table6_vars,
     Type = table6_type,
-    Main = unlist(lapply(seq_along(table6_models), function(i) format_csv(extract_stats(table6_models[[i]], paste0("extreme_", table6_vars[i], "_geomet"))))),
-    Interaction = table6_inter,
-    Control = unlist(lapply(seq_along(table6_models), function(i) format_csv(extract_stats(table6_models[[i]], "d_ln_population")))),
-    R2 = unlist(lapply(table6_models, function(m) if (!is.null(m)) round(summary(m)$r.squared,4) else NA)),
-    Obs = unlist(lapply(table6_models, function(m) if (!is.null(m)) nobs(m) else NA)),
-    FixedEffects = rep("Year, Country×Product, Product×Year", length(table6_vars))
+    Main = table6_main_effects,
+    Interaction = table6_interactions,
+    R2 = table6_r2,
+    Observations = table6_obs,
+    FixedEffects = rep("Year, Country×Product, Product×Year", length(table6_vars)),
+    stringsAsFactors = FALSE
   )
   
   print(table6_df)
@@ -662,13 +755,21 @@ for (period in EXPORT_PERIODS) {
         
         if (nrow(t5_row) > 0 && nrow(t6_row) > 0) {
           # Extraire les coefficients d'interaction
-          t5_coef <- tryCatch({
-            as.numeric(strsplit(as.character(t5_row$Interaction), ", ")[[1]][1])
-          }, error = function(e) NA)
+          # Fonction pour extraire le coefficient numérique à partir du format formatté
+          extract_coef <- function(formatted_str) {
+            # Pour le nouveau format propre (comme dans 04b)
+            if (grepl("\n", formatted_str)) {
+              parts <- strsplit(formatted_str, "\n")[[1]]
+              if (length(parts) > 0) {
+                num_str <- gsub("[^0-9.-]", "", parts[1])
+                return(as.numeric(num_str))
+              }
+            }
+            return(NA)
+          }
           
-          t6_coef <- tryCatch({
-            as.numeric(strsplit(as.character(t6_row$Interaction), ", ")[[1]][1])
-          }, error = function(e) NA)
+          t5_coef <- extract_coef(t5_row$Interaction)
+          t6_coef <- extract_coef(t6_row$Interaction)
           
           table4_comparison <- rbind(table4_comparison, data.frame(
             Disaster = dtype,
@@ -765,23 +866,61 @@ for (period in EXPORT_PERIODS) {
     }
   })
   
-  tableA1_main <- unlist(lapply(seq_along(tableA1_models), function(i) format_csv(extract_stats(tableA1_models[[i]], paste0("ln_", tableA1_vars[i], "_occurrence")))))
-  tableA1_inter <- unlist(lapply(seq_along(tableA1_models), function(i) {
+  # Construction propre de la table A1 (comme dans 04b)
+  tableA1_main_effects <- character(length(tableA1_models))
+  tableA1_interactions <- character(length(tableA1_models))
+  tableA1_r2 <- numeric(length(tableA1_models))
+  tableA1_obs <- integer(length(tableA1_models))
+  
+  for (i in seq_along(tableA1_models)) {
+    model <- tableA1_models[[i]]
     v <- tableA1_vars[i]
     type <- tableA1_type[i]
-    if (type=="Poor") format_csv(extract_stats(tableA1_models[[i]], paste0("extreme_", v, "_emdat_20p:is_poor_country")))
-    else format_csv(extract_stats(tableA1_models[[i]], paste0("extreme_", v, "_emdat_20p:is_small_country")))
-  }))
-  
+    
+    if (is.null(model)) {
+      tableA1_main_effects[i] <- "Model failed"
+      tableA1_interactions[i] <- "Model failed" 
+      tableA1_r2[i] <- NA
+      tableA1_obs[i] <- 0
+      next
+    }
+    
+    # Effet principal
+    main_var <- paste0("extreme_", v, "_emdat_20p")
+    main_stats <- extract_stats(model, main_var)
+    if (all(!is.na(main_stats))) {
+      tableA1_main_effects[i] <- format_coeff_clean(main_stats[1], main_stats[2], main_stats[3])
+    } else {
+      tableA1_main_effects[i] <- "Not found"
+    }
+    
+    # Interaction
+    inter_var <- if (type == "Poor") {
+      paste0("extreme_", v, "_emdat_20p:is_poor_country")
+    } else {
+      paste0("extreme_", v, "_emdat_20p:is_small_country")
+    }
+    inter_stats <- extract_stats(model, inter_var)
+    if (all(!is.na(inter_stats))) {
+      tableA1_interactions[i] <- format_coeff_clean(inter_stats[1], inter_stats[2], inter_stats[3])
+    } else {
+      tableA1_interactions[i] <- "Not found"
+    }
+    
+    # R² et observations
+    tableA1_r2[i] <- round(summary(model)$r.squared, 4)
+    tableA1_obs[i] <- nobs(model)
+  }
+
   tableA1_df <- data.frame(
     Disaster = tableA1_vars,
     Type = tableA1_type,
-    Main = tableA1_main,
-    Interaction = tableA1_inter,
-    Control = unlist(lapply(seq_along(tableA1_models), function(i) format_csv(extract_stats(tableA1_models[[i]], "d_ln_population")))),
-    R2 = unlist(lapply(tableA1_models, function(m) if (!is.null(m)) round(summary(m)$r.squared,4) else NA)),
-    Obs = unlist(lapply(tableA1_models, function(m) if (!is.null(m)) nobs(m) else NA)),
-    FixedEffects = rep("Year, Country×Product, Product×Year", length(tableA1_vars))
+    Main = tableA1_main_effects,
+    Interaction = tableA1_interactions,
+    R2 = tableA1_r2,
+    Observations = tableA1_obs,
+    FixedEffects = rep("Year, Country×Product, Product×Year", length(tableA1_vars)),
+    stringsAsFactors = FALSE
   )
   
   print(tableA1_df)
@@ -829,23 +968,61 @@ for (period in EXPORT_PERIODS) {
     }
   })
   
-  tableA2_main <- unlist(lapply(seq_along(tableA2_models), function(i) format_csv(extract_stats(tableA2_models[[i]], paste0("ln_", tableA2_vars[i], "_occurrence")))))
-  tableA2_inter <- unlist(lapply(seq_along(tableA2_models), function(i) {
+  # Construction propre de la table A2 (comme dans 04b)
+  tableA2_main_effects <- character(length(tableA2_models))
+  tableA2_interactions <- character(length(tableA2_models))
+  tableA2_r2 <- numeric(length(tableA2_models))
+  tableA2_obs <- integer(length(tableA2_models))
+  
+  for (i in seq_along(tableA2_models)) {
+    model <- tableA2_models[[i]]
     v <- tableA2_vars[i]
     type <- tableA2_type[i]
-    if (type=="Poor") format_csv(extract_stats(tableA2_models[[i]], paste0("extreme_", v, "_geomet_20p:is_poor_country")))
-    else format_csv(extract_stats(tableA2_models[[i]], paste0("extreme_", v, "_geomet_20p:is_small_country")))
-  }))
-  
+    
+    if (is.null(model)) {
+      tableA2_main_effects[i] <- "Model failed"
+      tableA2_interactions[i] <- "Model failed" 
+      tableA2_r2[i] <- NA
+      tableA2_obs[i] <- 0
+      next
+    }
+    
+    # Effet principal
+    main_var <- paste0("extreme_", v, "_geomet_20p")
+    main_stats <- extract_stats(model, main_var)
+    if (all(!is.na(main_stats))) {
+      tableA2_main_effects[i] <- format_coeff_clean(main_stats[1], main_stats[2], main_stats[3])
+    } else {
+      tableA2_main_effects[i] <- "Not found"
+    }
+    
+    # Interaction
+    inter_var <- if (type == "Poor") {
+      paste0("extreme_", v, "_geomet_20p:is_poor_country")
+    } else {
+      paste0("extreme_", v, "_geomet_20p:is_small_country")
+    }
+    inter_stats <- extract_stats(model, inter_var)
+    if (all(!is.na(inter_stats))) {
+      tableA2_interactions[i] <- format_coeff_clean(inter_stats[1], inter_stats[2], inter_stats[3])
+    } else {
+      tableA2_interactions[i] <- "Not found"
+    }
+    
+    # R² et observations
+    tableA2_r2[i] <- round(summary(model)$r.squared, 4)
+    tableA2_obs[i] <- nobs(model)
+  }
+
   tableA2_df <- data.frame(
     Disaster = tableA2_vars,
     Type = tableA2_type,
-    Main = tableA2_main,
-    Interaction = tableA2_inter,
-    Control = unlist(lapply(seq_along(tableA2_models), function(i) format_csv(extract_stats(tableA2_models[[i]], "d_ln_population")))),
-    R2 = unlist(lapply(tableA2_models, function(m) if (!is.null(m)) round(summary(m)$r.squared,4) else NA)),
-    Obs = unlist(lapply(tableA2_models, function(m) if (!is.null(m)) nobs(m) else NA)),
-    FixedEffects = rep("Year, Country×Product, Product×Year", length(tableA2_vars))
+    Main = tableA2_main_effects,
+    Interaction = tableA2_interactions,
+    R2 = tableA2_r2,
+    Observations = tableA2_obs,
+    FixedEffects = rep("Year, Country×Product, Product×Year", length(tableA2_vars)),
+    stringsAsFactors = FALSE
   )
   
   print(tableA2_df)

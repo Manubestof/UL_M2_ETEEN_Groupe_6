@@ -28,10 +28,12 @@ results/
 # OS
 .DS_Store
 Thumbs.db
+.vscode/
 
 # Source files to uncoment for publication
 article/
 memoire/
 
+# Backup files
 *_backup*
 *_dev*

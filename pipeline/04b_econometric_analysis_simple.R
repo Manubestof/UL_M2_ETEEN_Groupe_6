@@ -8,12 +8,27 @@ library(dplyr)
 library(readr)
 library(fixest)
 
-# === CHARGEMENT DE LA CONFIGURATION ===
-config_file <- "config.json"
-if (!file.exists(config_file)) {
-  stop("Configuration non trouvée : ", config_file)
+# === DÉTECTION ROBUSTE DU CHEMIN ET CHARGEMENT DE LA CONFIGURATION ===
+get_script_dir <- function() {
+  # Rscript: argv[1] est le chemin du script
+  args <- commandArgs(trailingOnly = FALSE)
+  file_arg <- grep("^--file=", args, value = TRUE)
+  if (length(file_arg) > 0) {
+    return(dirname(sub("^--file=", "", file_arg[1])))
+  }
+  # RStudio
+  if (requireNamespace("rstudioapi", quietly = TRUE) && rstudioapi::isAvailable()) {
+    return(dirname(rstudioapi::getActiveDocumentContext()$path))
+  }
+  # Fallback: getwd()
+  return(getwd())
 }
-config <- fromJSON(config_file)
+
+script_dir <- get_script_dir()
+project_root <- dirname(script_dir)
+config_path <- file.path(script_dir, "config.json")
+if (!file.exists(config_path)) config_path <- file.path(script_dir, "../pipeline/config.json")
+config <- fromJSON(config_path)
 
 # === FONCTION UTILITAIRE CORRIGÉE POUR FIXEST ===
 make_table_df_correct <- function(vars, models, inter_vars = NULL, types = NULL, names = NULL) {
@@ -107,8 +122,7 @@ make_table_df_correct <- function(vars, models, inter_vars = NULL, types = NULL,
 # === CHARGEMENT DES DONNÉES ===
 cat("=== ANALYSE ÉCONOMÉTRIQUE SIMPLE (TOUTES PÉRIODES) ===\n")
 
-# Chemin de base du projet
-project_root <- normalizePath("..")
+# Utilisation des chemins détectés
 output_dir <- file.path(project_root, config$RESULTS_DIR, "tables_simple")
 
 if (!dir.exists(output_dir)) {
