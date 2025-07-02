@@ -44,7 +44,8 @@ def get_pipeline_options():
     import argparse
     parser = argparse.ArgumentParser(description="Disaster data pipeline options")
     parser.add_argument("--clear-cache", dest="clear_cache", action="store_true", help="Clear cache before running (force rebuild)")
-    parser.set_defaults(clear_cache=False)
+    # Utiliser la valeur de CLEAR_CACHE de config.json comme valeur par défaut
+    parser.set_defaults(clear_cache=config.get("CLEAR_CACHE", False))
     args, _ = parser.parse_known_args()
     return args.clear_cache
 
@@ -424,6 +425,8 @@ def create_disaster_dataset(
     if clear_cache and cache_file.exists():
         cache_file.unlink()
         logger.info(f"Cache deleted: {cache_file}")
+    elif clear_cache:
+        logger.info(f"Option CLEAR_CACHE activée mais aucun cache à supprimer: {cache_file} n'existe pas")
 
     # Always use cache if present (unless clear_cache)
     if not clear_cache and cache_file.exists():
@@ -719,6 +722,12 @@ def create_disaster_dataset(
 if __name__ == "__main__":
     print("\n==================================\n   🌪️ PREPROCESS EM-DAT & GEOMET (2/4)   \n==================================\n")
     clear_cache = get_pipeline_options()
+    # Afficher clairement si le cache sera utilisé ou non
+    if clear_cache:
+        logger.info(f"🧹 Option CLEAR_CACHE activée ({config.get('CLEAR_CACHE', False)} dans config.json, priorité ligne de commande) : les caches existants seront supprimés.")
+    else:
+        logger.info(f"💾 Option CLEAR_CACHE désactivée ({config.get('CLEAR_CACHE', False)} dans config.json, priorité ligne de commande) : les caches existants seront utilisés s'ils existent.")
+    
     all_success = True
     for (start, end) in EXPORT_PERIODS:
         period_str = f"{start}_{end}"

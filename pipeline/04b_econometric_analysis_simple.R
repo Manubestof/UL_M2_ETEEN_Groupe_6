@@ -30,21 +30,31 @@ config_path <- file.path(script_dir, "config.json")
 if (!file.exists(config_path)) config_path <- file.path(script_dir, "../pipeline/config.json")
 config <- fromJSON(config_path)
 
-# === FONCTION UTILITAIRE CORRIGÉE POUR FIXEST ===
-make_table_df_correct <- function(vars, models, inter_vars = NULL, types = NULL, names = NULL) {
+# === FONCTION UTILITAIRE STANDARDISÉE ===
+make_table_df_correct <- function(vars, models, inter_vars = NULL, types = NULL, names = NULL, fixed_effects = NULL) {
   n_vars <- length(vars)
   n_models <- length(models)
   
-  result_df <- data.frame(
-    Variable = names %||% vars,
-    Type = types %||% rep("", n_vars),
-    Main = character(n_vars),
-    Interaction = character(n_vars),
-    R2 = numeric(n_vars),
-    Observations = integer(n_vars),
-    FixedEffects = rep("Country, Year", n_vars),
-    stringsAsFactors = FALSE
-  )
+  # Déterminer si on utilise "Variable" ou "Disaster" comme nom de colonne
+  col_name <- if(is.null(names) && !is.null(types) && any(grepl("Flood|Storm|Earthquake|Temperature", types))) {
+    "Disaster"
+  } else {
+    "Variable"
+  }
+  
+  # Créer le data frame avec le bon nom de colonne
+  result_cols <- c(col_name, "Type", "Main", "Interaction", "R2", "Observations", "FixedEffects")
+  result_df <- data.frame(matrix(NA, nrow = n_vars, ncol = length(result_cols)))
+  names(result_df) <- result_cols
+  
+  # Remplir les colonnes
+  result_df[[col_name]] <- names %||% vars
+  result_df$Type <- types %||% rep("", n_vars)
+  result_df$Main <- character(n_vars)
+  result_df$Interaction <- character(n_vars)
+  result_df$R2 <- numeric(n_vars)
+  result_df$Observations <- integer(n_vars)
+  result_df$FixedEffects <- fixed_effects %||% rep("Country, Year", n_vars)
   
   for (i in 1:n_vars) {
     model <- models[[i]]
@@ -63,7 +73,8 @@ make_table_df_correct <- function(vars, models, inter_vars = NULL, types = NULL,
       coef_names <- names(all_coefs)
       
       cat(sprintf("[DEBUG] Modèle %d (%s) - coefficients: %s\n", i, 
-                  types[i], paste(coef_names, collapse = ", ")))
+                  if(is.null(types)) "?" else types[i], 
+                  paste(coef_names, collapse = ", ")))
       
       # Extraire coefficient principal
       main_var <- vars[i]

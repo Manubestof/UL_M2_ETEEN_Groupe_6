@@ -62,56 +62,133 @@ format_coeff <- function(coef, se, pval) {
   sprintf("%.4f%s\n(%.4f)", coef, stars, se)
 }
 
-make_table_df <- function(vars, models, inter_vars = NULL, types = NULL, names = NULL, fixed_effects = "Year, Country×Product, Product×Year") {
-  keep <- which(!sapply(models, is.null))
-  models <- models[keep]
-  n <- length(models)
+# Fonction standardisée pour créer des tables de résultats
+make_table_df_standard <- function(vars, models, inter_vars = NULL, types = NULL, names = NULL, fixed_effects = NULL) {
+  n_vars <- length(vars)
+  n_models <- length(models)
   
-  # S'assurer que tous les vecteurs ont la bonne longueur
-  if (!is.null(vars)) vars <- vars[keep]
-  if (!is.null(types)) types <- types[keep]
-  if (!is.null(names)) names <- names[keep]
-  if (!is.null(inter_vars)) inter_vars <- inter_vars[keep]
-  
-  safe_extract <- function(i, fun, varname) {
-    if (i > length(models) || is.null(models[[i]]) || is.null(varname) || is.na(varname) || !nzchar(varname)) return(c(NA, NA, NA))
-    fun(models[[i]], varname)
+  # Déterminer si on utilise "Variable" ou "Disaster" comme nom de colonne
+  col_name <- if(is.null(names) && !is.null(types) && any(grepl("Flood|Storm|Earthquake|Temperature", types))) {
+    "Disaster"
+  } else {
+    "Variable"
   }
   
-  # Extraire et formater les coefficients principaux
-  main_coeffs <- sapply(seq_len(n), function(i) {
-    v <- if (!is.null(vars) && length(vars) >= i) vars[i] else NA
-    if (is.null(v) || is.na(v) || !nzchar(v)) return("")
-    stats <- safe_extract(i, extract_stats, v)
-    if (any(is.na(stats))) return("")
-    format_coeff(stats[1], stats[2], stats[3])
-  })
+  # Créer le data frame avec le bon nom de colonne
+  result_cols <- c(col_name, "Type", "Main", "Interaction", "R2", "Observations", "FixedEffects")
+  result_df <- data.frame(matrix(NA, nrow = n_vars, ncol = length(result_cols)))
+  names(result_df) <- result_cols
   
-  # Extraire et formater les interactions
-  inter_coeffs <- if (!is.null(inter_vars)) {
-    sapply(seq_len(n), function(i) {
-      stats <- safe_extract(i, extract_stats, inter_vars[i])
-      if (any(is.na(stats))) return("")
-      format_coeff(stats[1], stats[2], stats[3])
-    })
-  } else rep("", n)
+  # Remplir les colonnes
+  result_df[[col_name]] <- names %||% vars
+  result_df$Type <- types %||% rep("", n_vars)
+  result_df$Main <- character(n_vars)
+  result_df$Interaction <- character(n_vars)
+  result_df$R2 <- numeric(n_vars)
+  result_df$Observations <- integer(n_vars)
+  result_df$FixedEffects <- fixed_effects %||% rep("Year, Country×Product, Product×Year", n_vars)
   
-  # Extraire R² et observations
-  r2 <- sapply(models, function(m) if (!is.null(m)) round(summary(m)$r.squared, 4) else NA)
-  obs <- sapply(models, function(m) if (!is.null(m)) nobs(m) else NA)
+  # Remplir les résultats des modèles
+  for (i in 1:n_vars) {
+    model <- models[[i]]
+    v <- vars[i]
+    
+    if (is.null(model) || inherits(model, "try-error")) {
+      result_df$Main[i] <- "Model failed"
+      result_df$Interaction[i] <- "Model failed"
+      result_df$R2[i] <- NA
+      result_df$Observations[i] <- 0
+      next
+    }
+    
+    # Traitement différent selon le type de modèle (lm ou fixest)
+    if (inherits(model, "fixest")) {
+      # Pour les modèles fixest
+      all_coefs <- coef(model)
+      coef_names <- names(all_coefs)
+      
+      # Coefficient principal
+      if (v %in% coef_names) {
+        coef_val <- all_coefs[v]
+        se_val <- summary(model)$se[v]
+        t_val <- coef_val / se_val
+        p_val <- 2 * pt(abs(t_val), df = model$nobs - length(all_coefs) - 1, lower.tail = FALSE)
+        
+        # Formatage avec significativité
+        stars <- ""
+        if (!is.na(p_val)) {
+          if (p_val < 0.001) stars <- "***"
+          else if (p_val < 0.01) stars <- "**"
+          else if (p_val < 0.05) stars <- "*"
+          else if (p_val < 0.1) stars <- "°"
+        }
+        
+        result_df$Main[i] <- sprintf("%.6f%s\n(%.6f)", coef_val, stars, se_val)
+      } else {
+        result_df$Main[i] <- "NA"
+      }
+      
+      # Coefficient d'interaction
+      if (!is.null(inter_vars) && !is.na(inter_vars[i])) {
+        inter_var <- inter_vars[i]
+        if (inter_var %in% coef_names) {
+          coef_val <- all_coefs[inter_var]
+          se_val <- summary(model)$se[inter_var]
+          t_val <- coef_val / se_val
+          p_val <- 2 * pt(abs(t_val), df = model$nobs - length(all_coefs) - 1, lower.tail = FALSE)
+          
+          # Formatage avec significativité
+          stars <- ""
+          if (!is.na(p_val)) {
+            if (p_val < 0.001) stars <- "***"
+            else if (p_val < 0.01) stars <- "**"
+            else if (p_val < 0.05) stars <- "*"
+            else if (p_val < 0.1) stars <- "°"
+          }
+          
+          result_df$Interaction[i] <- sprintf("%.6f%s\n(%.6f)", coef_val, stars, se_val)
+        } else {
+          result_df$Interaction[i] <- "NA"
+        }
+      } else {
+        result_df$Interaction[i] <- ""
+      }
+      
+      # R² et observations
+      result_df$R2[i] <- round(summary(model)$r.squared, 4)
+      result_df$Observations[i] <- model$nobs
+    } else {
+      # Pour les modèles lm standard
+      # Effet principal
+      main_stats <- extract_stats(model, v)
+      if (all(!is.na(main_stats))) {
+        result_df$Main[i] <- format_coeff(main_stats[1], main_stats[2], main_stats[3])
+      } else {
+        result_df$Main[i] <- "NA"
+      }
+      
+      # Interaction
+      if (!is.null(inter_vars) && !is.na(inter_vars[i])) {
+        inter_var <- inter_vars[i]
+        inter_stats <- extract_stats(model, inter_var)
+        if (all(!is.na(inter_stats))) {
+          result_df$Interaction[i] <- format_coeff(inter_stats[1], inter_stats[2], inter_stats[3])
+        } else {
+          result_df$Interaction[i] <- "NA"
+        }
+      } else {
+        result_df$Interaction[i] <- ""
+      }
+      
+      # R² et observations
+      result_df$R2[i] <- round(summary(model)$r.squared, 4)
+      result_df$Observations[i] <- nobs(model)
+    }
+  }
   
-  df <- data.frame(
-    Variable = if (!is.null(names)) names else vars,
-    Type = if (!is.null(types)) types else rep("", n),
-    Main = main_coeffs,
-    Interaction = inter_coeffs,
-    R2 = r2,
-    Observations = obs,
-    FixedEffects = rep(fixed_effects, n),
-    stringsAsFactors = FALSE
-  )
-  return(df)
+  return(result_df)
 }
+
 # Détection robuste du chemin du script ou fallback sur getwd()
 get_script_dir <- function() {
   # Rscript: argv[1] est le chemin du script
@@ -447,12 +524,13 @@ for (period in EXPORT_PERIODS) {
   }
 
   cat("[TABLE 1] Construction de table1_df\n")
-  table1_df <- make_table_df(
+  table1_df <- make_table_df_standard(
     vars = table1_vars,
     models = table1_models,
     types = table1_types,
     names = table1_names,
-    inter_vars = table1_inter_vars
+    inter_vars = table1_inter_vars,
+    fixed_effects = rep("Year, Country×Product, Product×Year", length(table1_vars))
   )
   print(table1_df)
   # Le nom du fichier de sortie inclut la métrique principale (concaténée)
@@ -518,10 +596,16 @@ for (period in EXPORT_PERIODS) {
 
   if (exists("table2_models") && exists("table2_vars") && exists("table2_inter")) {
     cat("[TABLE 2] Construction de table2_df\n")
-    table2_df <- make_table_df(
+    # Construction des variables d'interaction pour Table 2
+    table2_inter_vars <- sapply(seq_along(table2_vars), function(i) {
+      paste0("I(", table2_vars[i], " * is_poor_country)")
+    })
+    
+    table2_df <- make_table_df_standard(
       vars = table2_vars,
       models = table2_models,
-      inter_vars = table2_inter
+      inter_vars = table2_inter_vars,
+      fixed_effects = rep("Year, Country×Product, Product×Year", length(table2_vars))
     )
     print(table2_df)
     # Nom de fichier simplifié
@@ -540,10 +624,16 @@ for (period in EXPORT_PERIODS) {
   cat("==============================\n")
   if (exists("table3_models") && exists("table3_vars") && exists("table3_inter")) {
     cat("[TABLE 3] Construction de table3_df\n")
-    table3_df <- make_table_df(
+    # Construction des variables d'interaction pour Table 3
+    table3_inter_vars <- sapply(seq_along(table3_vars), function(i) {
+      paste0("I(", table3_vars[i], " * is_small_country)")
+    })
+    
+    table3_df <- make_table_df_standard(
       vars = table3_vars,
       models = table3_models,
-      inter_vars = table3_inter
+      inter_vars = table3_inter_vars,
+      fixed_effects = rep("Year, Country×Product, Product×Year", length(table3_vars))
     )
     print(table3_df)
     # Ajout du label de métrique dans le nom du fichier
@@ -583,61 +673,28 @@ for (period in EXPORT_PERIODS) {
     }
   })
   
-  # Construction propre de la table 5 (comme dans 04b)
-  table5_main_effects <- character(length(table5_models))
-  table5_interactions <- character(length(table5_models))
-  table5_r2 <- numeric(length(table5_models))
-  table5_obs <- integer(length(table5_models))
+  # Construction standardisée de la table 5
+  table5_main_vars <- sapply(seq_along(table5_vars), function(i) {
+    paste0("extreme_", table5_vars[i], "_emdat")
+  })
   
-  for (i in seq_along(table5_models)) {
-    model <- table5_models[[i]]
+  table5_inter_vars <- sapply(seq_along(table5_vars), function(i) {
     v <- table5_vars[i]
     type <- table5_type[i]
-    
-    if (is.null(model)) {
-      table5_main_effects[i] <- "Model failed"
-      table5_interactions[i] <- "Model failed" 
-      table5_r2[i] <- NA
-      table5_obs[i] <- 0
-      next
-    }
-    
-    # Effet principal
-    main_var <- paste0("extreme_", v, "_emdat")
-    main_stats <- extract_stats(model, main_var)
-    if (all(!is.na(main_stats))) {
-      table5_main_effects[i] <- format_coeff_clean(main_stats[1], main_stats[2], main_stats[3])
-    } else {
-      table5_main_effects[i] <- "Not found"
-    }
-    
-    # Interaction
-    inter_var <- if (type == "Poor") {
+    if (type == "Poor") {
       paste0("extreme_", v, "_emdat:is_poor_country")
     } else {
       paste0("extreme_", v, "_emdat:is_small_country")
     }
-    inter_stats <- extract_stats(model, inter_var)
-    if (all(!is.na(inter_stats))) {
-      table5_interactions[i] <- format_coeff_clean(inter_stats[1], inter_stats[2], inter_stats[3])
-    } else {
-      table5_interactions[i] <- "Not found"
-    }
-    
-    # R² et observations
-    table5_r2[i] <- round(summary(model)$r.squared, 4)
-    table5_obs[i] <- nobs(model)
-  }
-
-  table5_df <- data.frame(
-    Disaster = table5_vars,
-    Type = table5_type,
-    Main = table5_main_effects,
-    Interaction = table5_interactions,
-    R2 = table5_r2,
-    Observations = table5_obs,
-    FixedEffects = rep("Year, Country×Product, Product×Year", length(table5_vars)),
-    stringsAsFactors = FALSE
+  })
+  
+  table5_df <- make_table_df_standard(
+    vars = table5_main_vars,
+    models = table5_models,
+    inter_vars = table5_inter_vars,
+    types = table5_type,
+    names = table5_vars,
+    fixed_effects = rep("Year, Country×Product, Product×Year", length(table5_vars))
   )
   
   print(table5_df)
@@ -672,61 +729,28 @@ for (period in EXPORT_PERIODS) {
     }
   })
   
-  # Construction propre de la table 6 (comme dans 04b)
-  table6_main_effects <- character(length(table6_models))
-  table6_interactions <- character(length(table6_models))
-  table6_r2 <- numeric(length(table6_models))
-  table6_obs <- integer(length(table6_models))
+  # Construction standardisée de la table 6
+  table6_main_vars <- sapply(seq_along(table6_vars), function(i) {
+    paste0("extreme_", table6_vars[i], "_geomet")
+  })
   
-  for (i in seq_along(table6_models)) {
-    model <- table6_models[[i]]
+  table6_inter_vars <- sapply(seq_along(table6_vars), function(i) {
     v <- table6_vars[i]
     type <- table6_type[i]
-    
-    if (is.null(model)) {
-      table6_main_effects[i] <- "Model failed"
-      table6_interactions[i] <- "Model failed" 
-      table6_r2[i] <- NA
-      table6_obs[i] <- 0
-      next
-    }
-    
-    # Effet principal
-    main_var <- paste0("extreme_", v, "_geomet")
-    main_stats <- extract_stats(model, main_var)
-    if (all(!is.na(main_stats))) {
-      table6_main_effects[i] <- format_coeff_clean(main_stats[1], main_stats[2], main_stats[3])
-    } else {
-      table6_main_effects[i] <- "Not found"
-    }
-    
-    # Interaction
-    inter_var <- if (type == "Poor") {
+    if (type == "Poor") {
       paste0("extreme_", v, "_geomet:is_poor_country")
     } else {
       paste0("extreme_", v, "_geomet:is_small_country")
     }
-    inter_stats <- extract_stats(model, inter_var)
-    if (all(!is.na(inter_stats))) {
-      table6_interactions[i] <- format_coeff_clean(inter_stats[1], inter_stats[2], inter_stats[3])
-    } else {
-      table6_interactions[i] <- "Not found"
-    }
-    
-    # R² et observations
-    table6_r2[i] <- round(summary(model)$r.squared, 4)
-    table6_obs[i] <- nobs(model)
-  }
-
-  table6_df <- data.frame(
-    Disaster = table6_vars,
-    Type = table6_type,
-    Main = table6_main_effects,
-    Interaction = table6_interactions,
-    R2 = table6_r2,
-    Observations = table6_obs,
-    FixedEffects = rep("Year, Country×Product, Product×Year", length(table6_vars)),
-    stringsAsFactors = FALSE
+  })
+  
+  table6_df <- make_table_df_standard(
+    vars = table6_main_vars,
+    models = table6_models,
+    inter_vars = table6_inter_vars,
+    types = table6_type,
+    names = table6_vars,
+    fixed_effects = rep("Year, Country×Product, Product×Year", length(table6_vars))
   )
   
   print(table6_df)
@@ -866,61 +890,28 @@ for (period in EXPORT_PERIODS) {
     }
   })
   
-  # Construction propre de la table A1 (comme dans 04b)
-  tableA1_main_effects <- character(length(tableA1_models))
-  tableA1_interactions <- character(length(tableA1_models))
-  tableA1_r2 <- numeric(length(tableA1_models))
-  tableA1_obs <- integer(length(tableA1_models))
+  # Construction standardisée de la table A1
+  tableA1_main_vars <- sapply(seq_along(tableA1_vars), function(i) {
+    paste0("extreme_", tableA1_vars[i], "_emdat_20p")
+  })
   
-  for (i in seq_along(tableA1_models)) {
-    model <- tableA1_models[[i]]
+  tableA1_inter_vars <- sapply(seq_along(tableA1_vars), function(i) {
     v <- tableA1_vars[i]
     type <- tableA1_type[i]
-    
-    if (is.null(model)) {
-      tableA1_main_effects[i] <- "Model failed"
-      tableA1_interactions[i] <- "Model failed" 
-      tableA1_r2[i] <- NA
-      tableA1_obs[i] <- 0
-      next
-    }
-    
-    # Effet principal
-    main_var <- paste0("extreme_", v, "_emdat_20p")
-    main_stats <- extract_stats(model, main_var)
-    if (all(!is.na(main_stats))) {
-      tableA1_main_effects[i] <- format_coeff_clean(main_stats[1], main_stats[2], main_stats[3])
-    } else {
-      tableA1_main_effects[i] <- "Not found"
-    }
-    
-    # Interaction
-    inter_var <- if (type == "Poor") {
+    if (type == "Poor") {
       paste0("extreme_", v, "_emdat_20p:is_poor_country")
     } else {
       paste0("extreme_", v, "_emdat_20p:is_small_country")
     }
-    inter_stats <- extract_stats(model, inter_var)
-    if (all(!is.na(inter_stats))) {
-      tableA1_interactions[i] <- format_coeff_clean(inter_stats[1], inter_stats[2], inter_stats[3])
-    } else {
-      tableA1_interactions[i] <- "Not found"
-    }
-    
-    # R² et observations
-    tableA1_r2[i] <- round(summary(model)$r.squared, 4)
-    tableA1_obs[i] <- nobs(model)
-  }
-
-  tableA1_df <- data.frame(
-    Disaster = tableA1_vars,
-    Type = tableA1_type,
-    Main = tableA1_main_effects,
-    Interaction = tableA1_interactions,
-    R2 = tableA1_r2,
-    Observations = tableA1_obs,
-    FixedEffects = rep("Year, Country×Product, Product×Year", length(tableA1_vars)),
-    stringsAsFactors = FALSE
+  })
+  
+  tableA1_df <- make_table_df_standard(
+    vars = tableA1_main_vars,
+    models = tableA1_models,
+    inter_vars = tableA1_inter_vars,
+    types = tableA1_type,
+    names = tableA1_vars,
+    fixed_effects = rep("Year, Country×Product, Product×Year", length(tableA1_vars))
   )
   
   print(tableA1_df)
